@@ -1,0 +1,26 @@
+﻿{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "UnHTTP",
+  "Description": "",
+  "Category": "",
+  "CreatedBy": "Other Courses",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "Installed": true,
+  "Modules": [
+	{
+		"Name": "UnHTTP",
+		"Type": "Runtime",
+		"LoadingPhase": "Default",
+		"WhitelistPlatforms": [
+			"Win64"
+		]
+	}
+  ]
+}

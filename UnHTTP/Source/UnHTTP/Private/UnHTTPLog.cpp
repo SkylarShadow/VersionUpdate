@@ -1,0 +1,4 @@
+﻿
+#include "UnHTTPLog.h"
+
+DEFINE_LOG_CATEGORY(LogUnHTTP);
