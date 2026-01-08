@@ -14,5 +14,4 @@ FString ProjectRootPath;
 TArray<FString> RelativePatchs;
 uint32 ProjectProcessID = 0;
 float ProgressInstallationPercentage = 0.f;
-//TArray<FRemotePatchFile> DiscardInfo;
 TArray<FString> DiscardPaths;
