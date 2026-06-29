@@ -1,4 +1,4 @@
-﻿
+﻿﻿
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,7 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVersionBPDelegate, EServerVersionRe
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FObjectCompleteBPDelegate, const FString &,InName);
 
 UCLASS(BlueprintType, Blueprintable)
-class VERSIONUPDATE_API UVersionControlObject :public UObject, public FTickableGameObject
+class VERSIONUPDATE_API UVersionUpdateObject :public UObject, public FTickableGameObject
 {
 	GENERATED_BODY()
 
@@ -36,10 +36,10 @@ public:
 	FObjectCompleteBPDelegate OnObjectCompleteBPDelegate;
 
 public:
-	UVersionControlObject();
+	UVersionUpdateObject();
 
 	UFUNCTION(BlueprintCallable, meta = (DisplayName = "CreateVersionObject", Keywords = "CVO"), Category = "VersionControl")
-	static UVersionControlObject* CreateObject(UClass* InClass = NULL, UObject* InParent = NULL);
+	static UVersionUpdateObject* CreateObject(UClass* InClass = NULL, UObject* InParent = NULL);
 
 	UFUNCTION(BlueprintCallable, meta = (Keywords = "IV"), Category = "Version")
 	virtual bool InitVersion();

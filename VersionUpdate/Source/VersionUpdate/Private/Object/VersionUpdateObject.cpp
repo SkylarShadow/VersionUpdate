@@ -1,4 +1,4 @@
-﻿
+﻿﻿
 
 #include "Object/VersionUpdateObject.h"
 #include "Log/VersionUpdateLog.h"
@@ -20,7 +20,7 @@ float LastFraction = 0.f;
 float PercentageInterval = 0.f;
 float ProgressInstallationPercentage = 0.f;
 
-void UVersionControlObject::ResetProgramProgress()
+void UVersionUpdateObject::ResetProgramProgress()
 {
 	PakNumber = 0.f;
 	CustomPakNumber = 0.f;
@@ -58,18 +58,18 @@ struct FPakInstallationProgress :public FCopyProgress
 	}
 };
 
-UVersionControlObject::UVersionControlObject()
+UVersionUpdateObject::UVersionUpdateObject()
 {
 	bInitialization = false;
 	bMajorVersion = false;
 	bSeamlessHotUpdate = GetDefault<UVersionManifestClientObject>()->bSeamlessHotUpdate;
 }
 
-UVersionControlObject* UVersionControlObject::CreateObject(UClass* InClass, UObject* InParent)
+UVersionUpdateObject* UVersionUpdateObject::CreateObject(UClass* InClass, UObject* InParent)
 {
 	if (InParent)
 	{
-		if (UVersionControlObject* Obj = NewObject<UVersionControlObject>(InParent, InClass))
+		if (UVersionUpdateObject* Obj = NewObject<UVersionUpdateObject>(InParent, InClass))
 		{
 			UE_LOG(LogVersionControl, Log, TEXT("Create an object with a parent."));
 			Obj->InitVersionControlObject();
@@ -78,7 +78,7 @@ UVersionControlObject* UVersionControlObject::CreateObject(UClass* InClass, UObj
 	}
 	else
 	{
-		if (UVersionControlObject* Obj = NewObject<UVersionControlObject>(NULL, InClass))
+		if (UVersionUpdateObject* Obj = NewObject<UVersionUpdateObject>(NULL, InClass))
 		{
 			Obj->AddToRoot();
 			Obj->InitVersionControlObject();
@@ -94,7 +94,7 @@ UVersionControlObject* UVersionControlObject::CreateObject(UClass* InClass, UObj
 }
 
 //入口 一
-bool UVersionControlObject::InitVersion()
+bool UVersionUpdateObject::InitVersion()
 {
 	if (GEngine && true)
 	{
@@ -119,7 +119,7 @@ bool UVersionControlObject::InitVersion()
 }
 
 // 如果是在Tick检测版本更新要设置为true
-bool UVersionControlObject::GetCurrentServerVersion(bool bSynchronous)
+bool UVersionUpdateObject::GetCurrentServerVersion(bool bSynchronous)
 {
 	bool bConConnectNet = false;
 
@@ -196,7 +196,7 @@ bool UVersionControlObject::GetCurrentServerVersion(bool bSynchronous)
 }
 
 //热更新
-void UVersionControlObject::UpdateVersion()
+void UVersionUpdateObject::UpdateVersion()
 {
 	auto CombineURL = [](const FString& Base, const FString& FileName) -> FString
 		{
@@ -265,7 +265,7 @@ void UVersionControlObject::UpdateVersion()
 	Http->GetObjectsToMemory(DownloadURLs);
 }
 
-void UVersionControlObject::OnUpdateMajorVersion()
+void UVersionUpdateObject::OnUpdateMajorVersion()
 {
 	PendingDownloadFiles.Empty();
 	PendingDiscardFiles.Empty();
@@ -311,7 +311,7 @@ void ExistsAndCreate(const FString &InNewPath)
 	}
 }
 
-FString UVersionControlObject::GetDownLoadPathToPak()
+FString UVersionUpdateObject::GetDownLoadPathToPak()
 {
 	FString DownloadPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("TmpPak"));
 	ExistsAndCreate(DownloadPath);
@@ -319,7 +319,7 @@ FString UVersionControlObject::GetDownLoadPathToPak()
 	return DownloadPath;
 }
 
-FString UVersionControlObject::GetDownLoadPathToCustom()
+FString UVersionUpdateObject::GetDownLoadPathToCustom()
 {
 	FString DownloadPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("TmpCustom"));
 	ExistsAndCreate(DownloadPath);
@@ -327,7 +327,7 @@ FString UVersionControlObject::GetDownLoadPathToCustom()
 }
 
 //GetObjectsToMemory 回调
-void UVersionControlObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
+void UVersionUpdateObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
 {
 	const FString HeadName = FPaths::GetCleanFilename(HttpRequest->GetURL());
 
@@ -428,7 +428,7 @@ void UVersionControlObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttp
 	OnObjectCompleteBPDelegate.Broadcast(HeadName);
 }
 
-void UVersionControlObject::OnRequestProgress(FHttpRequestPtr HttpRequest, int32 TotalBytes, int32 BytesReceived)
+void UVersionUpdateObject::OnRequestProgress(FHttpRequestPtr HttpRequest, int32 TotalBytes, int32 BytesReceived)
 {
 	FString Head = FPaths::GetCleanFilename(HttpRequest->GetURL());
 
@@ -438,13 +438,13 @@ void UVersionControlObject::OnRequestProgress(FHttpRequestPtr HttpRequest, int32
 	OnProgressDelegate.Broadcast(InValue, Head, TotalBytes, BytesReceived);
 }
 
-void UVersionControlObject::OnRequestHeaderReceived(FHttpRequestPtr Request, const FString& HeaderName, const FString& NewHeaderValue)
+void UVersionUpdateObject::OnRequestHeaderReceived(FHttpRequestPtr Request, const FString& HeaderName, const FString& NewHeaderValue)
 {
 
 }
 
 // 只更新了版本(例如丢弃了某个包)或全部下载完成后 回调
-void UVersionControlObject::OnRequestsComplete()
+void UVersionUpdateObject::OnRequestsComplete()
 {
 	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] All download tasks completed."));
 
@@ -520,7 +520,7 @@ void UVersionControlObject::OnRequestsComplete()
 
 //异步版本检测
 // 三
-void UVersionControlObject::OnCompareServerPatchsList()
+void UVersionUpdateObject::OnCompareServerPatchsList()
 {
 	UE_LOG(LogVersionControl, Log,
 		TEXT("[VersionUpdate] Compare server version with local files (Server-only mode)"));
@@ -608,7 +608,7 @@ void UVersionControlObject::OnCompareServerPatchsList()
 }
 
 // 无感更新
-bool UVersionControlObject::ExecuteInstallationProgressByUninstallAll()
+bool UVersionUpdateObject::ExecuteInstallationProgressByUninstallAll()
 {
 	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] ExecuteInstallationProgressByUninstallAll"));
 
@@ -680,7 +680,7 @@ bool UVersionControlObject::ExecuteInstallationProgressByUninstallAll()
 	return true;
 }
 
-bool UVersionControlObject::UnLoadAllPak()
+bool UVersionUpdateObject::UnLoadAllPak()
 {
 	PakFileCache.Empty();
 	UVersionPakBPLibrary::GetMountedPakFilenames(PakFileCache);
@@ -700,7 +700,7 @@ bool UVersionControlObject::UnLoadAllPak()
 	return true;
 }
 
-bool UVersionControlObject::LoadAllPakCache()
+bool UVersionUpdateObject::LoadAllPakCache()
 {
 	if (PakFileCache.Num() > 0)
 	{
@@ -721,7 +721,7 @@ bool UVersionControlObject::LoadAllPakCache()
 
 
 // 唤醒独立程序
-bool UVersionControlObject::CallInstallationProgress()
+bool UVersionUpdateObject::CallInstallationProgress()
 {
 	auto GetPlatformName = []() -> FString
 		{
@@ -830,7 +830,7 @@ bool UVersionControlObject::CallInstallationProgress()
 }
 
 //初始化读或写json
-void UVersionControlObject::InitVersionControlObject()
+void UVersionUpdateObject::InitVersionControlObject()
 {
 
 	FString ClientVersionsPaths = FPaths::ConvertRelativePathToFull(GetClientVersionRelativePath());
@@ -846,7 +846,7 @@ void UVersionControlObject::InitVersionControlObject()
 	}
 }
 // 写client json
-bool UVersionControlObject::SerializeClientVersion()
+bool UVersionUpdateObject::SerializeClientVersion()
 {
 	FString Json;
 	FString FilePath = GetClientVersionRelativePath();
@@ -867,7 +867,7 @@ bool UVersionControlObject::SerializeClientVersion()
 }
 
 // 读client json
-bool UVersionControlObject::DeserializationClientVersion()
+bool UVersionUpdateObject::DeserializationClientVersion()
 {
 	FString FilePath = GetClientVersionRelativePath();
 
@@ -889,22 +889,22 @@ bool UVersionControlObject::DeserializationClientVersion()
 }
 
 //client json目录
-FString UVersionControlObject::GetClientVersionRelativePath()
+FString UVersionUpdateObject::GetClientVersionRelativePath()
 {
 	return FPaths::ProjectContentDir() / GetDefault<UVersionManifestClientObject>()->ClientJsonSavePath;
 }
 
 
-float UVersionControlObject::GetProgressInstallationPercentage()
+float UVersionUpdateObject::GetProgressInstallationPercentage()
 {
 	return ProgressInstallationPercentage;
 }
 
-void UVersionControlObject::Tick(float DeltaTime)
+void UVersionUpdateObject::Tick(float DeltaTime)
 {
 }
 
-TStatId UVersionControlObject::GetStatId() const
+TStatId UVersionUpdateObject::GetStatId() const
 {
 	return TStatId();
 }
