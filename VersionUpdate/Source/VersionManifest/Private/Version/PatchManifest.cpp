@@ -1,8 +1,8 @@
 ﻿
-#include "Version/CtrlVersion.h"
+#include "Version/PatchManifest.h"
 
 
-namespace VersionControl
+namespace PatchManifest
 {
 	EPatchFileTag ParseTag(const FString& TagStr)
 	{

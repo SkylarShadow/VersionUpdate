@@ -28,7 +28,7 @@ public class VersionUpdate : ModuleRules
                 "Core",
                 "HTTP",
                 "VersionPak",
-                "VersionObject",
+                "VersionManifest",
                 "VersionInstallation"
 				// ... add other public dependencies that you statically link with here ...
 			}

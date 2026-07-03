@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FVersionObjectModule : public IModuleInterface
+class FVersionManifestModule : public IModuleInterface
 {
 public:
 

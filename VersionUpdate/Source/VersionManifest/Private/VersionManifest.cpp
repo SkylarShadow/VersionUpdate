@@ -1,16 +1,16 @@
 ﻿
 
-#include "VersionObject.h"
+#include "VersionManifest.h"
 
-#define LOCTEXT_NAMESPACE "VersionObject"
+#define LOCTEXT_NAMESPACE "VersionManifest"
 
-void FVersionObjectModule::StartupModule()
+void FVersionManifestModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
 
 }
 
-void FVersionObjectModule::ShutdownModule()
+void FVersionManifestModule::ShutdownModule()
 {
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 
@@ -18,4 +18,4 @@ void FVersionObjectModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FVersionObjectModule, VersionObject)
+IMPLEMENT_MODULE(FVersionManifestModule, VersionObject)

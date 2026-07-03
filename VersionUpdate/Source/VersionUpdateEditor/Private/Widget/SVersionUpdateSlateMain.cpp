@@ -270,7 +270,7 @@ bool SVersionUpdateSlateMain::ImportJson(const FString& FilePath)
 	}
 
 	FPatchList LoadedList;
-	if (!VersionControl::Read(Json, LoadedList))
+	if (!PatchManifest::Read(Json, LoadedList))
 	{
 		UE_LOG(LogTemp, Error, TEXT("ImportJson failed: parse json failed %s"), *FilePath);
 		return false;
@@ -286,7 +286,7 @@ bool SVersionUpdateSlateMain::ExportJson(const FString& FilePath)
 	if (FilePath.IsEmpty() || !ManifestObject) return false;
 
 	FString Json;
-	VersionControl::Save(ManifestObject->PatchList, Json);
+	PatchManifest::Save(ManifestObject->PatchList, Json);
 
 	return FFileHelper::SaveStringToFile(Json, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8);
 }

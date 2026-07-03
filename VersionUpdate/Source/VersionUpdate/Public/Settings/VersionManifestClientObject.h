@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Version/CtrlVersion.h"
+#include "Version/PatchManifest.h"
 #include "VersionManifestClientObject.generated.h"
 
 
@@ -50,7 +50,7 @@ public:
 	bool bSynchronous = true;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Version")
-	FString ClientJsonSavePath = CtrlVerClientJsonRelativePath;
+	FString ClientJsonSavePath = ClientVersionJsonRelativePath;
 
 };
 

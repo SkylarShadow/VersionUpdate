@@ -1,9 +1,9 @@
-﻿﻿
+
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "VersionInstallationLog.h"
+#include "VersionInstallationLogChannels.h"
 #include "VersionInstallationType.h"
 #include "HAL/FileManager.h"
 
@@ -70,11 +70,11 @@ template<class T>
 inline void FVersionInstallationManage::ResourceCopy(const TArray<FString>& InFoundFiles, const FString& InProjectToContentPaks, TArray<T*>& OutInstallationProgressArray)
 {
 	//资源拷贝
-	UE_LOG(VersionInstallationLog, Display, TEXT("Resource copy."));
+	UE_LOG(LogVersionInstallation, Display, TEXT("Resource copy."));
 
 	for (auto& Tmp : InFoundFiles)
 	{
-		UE_LOG(VersionInstallationLog, Display, TEXT("Resource = [%s]"), *Tmp);
+		UE_LOG(LogVersionInstallation, Display, TEXT("Resource = [%s]"), *Tmp);
 
 		FString TargetPath = InProjectToContentPaks / FPaths::GetCleanFilename(Tmp);
 		T* InstallationProgress = new T();
@@ -88,10 +88,10 @@ inline void FVersionInstallationManage::ResourceCopy(const TArray<FString>& InFo
 template<class T>
 inline void FVersionInstallationManage::ResourceCopyCustom(const TArray<FVersionInstallationCustomCopyPath>& InCustomCopyPaths, TArray<T*>& OutCustomCopyPaths)
 {
-	UE_LOG(VersionInstallationLog, Display, TEXT("Custom Resource copy."));
+	UE_LOG(LogVersionInstallation, Display, TEXT("Custom Resource copy."));
 	for (auto& Tmp : InCustomCopyPaths)
 	{
-		UE_LOG(VersionInstallationLog, Display, TEXT("From [%s] => [%s]"), *Tmp.From, *Tmp.To);
+		UE_LOG(LogVersionInstallation, Display, TEXT("From [%s] => [%s]"), *Tmp.From, *Tmp.To);
 
 		T* InstallationProgress = new T();
 		IFileManager::Get().Copy(*Tmp.To, *Tmp.From, true, false, false, InstallationProgress);
@@ -122,7 +122,7 @@ inline bool FVersionInstallationManage::HandleHotInstallation(
 	float& OutProgressInstallationPercentage)
 {
 	//II.资源遍历
-	UE_LOG(VersionInstallationLog, Display, TEXT("2. Resource traversal."));
+	UE_LOG(LogVersionInstallation, Display, TEXT("2. Resource traversal."));
 
 	TArray<FString> FoundFiles;
 	CollectFiles(InResourcesToCopied, FoundFiles);
@@ -143,7 +143,7 @@ inline bool FVersionInstallationManage::HandleHotInstallation(
 
 	ResourceCopy(FoundFiles, InProjectToContentPaks, InstallationProgressArray);
 
-	UE_LOG(VersionInstallationLog, Display, TEXT("3.Custom Resource copy."));
+	UE_LOG(LogVersionInstallation, Display, TEXT("3.Custom Resource copy."));
 	ResourceCopyCustom(CustomCopyPaths, InstallationProgressArray);
 
 	//等待处理 等待异步处理完成
@@ -151,12 +151,12 @@ inline bool FVersionInstallationManage::HandleHotInstallation(
 
 	if (IsEngineExitRequested())
 	{
-		UE_LOG(VersionInstallationLog, Display, TEXT("5. Program forced exit."));
+		UE_LOG(LogVersionInstallation, Display, TEXT("5. Program forced exit."));
 		return false;
 	}
 
 	//V.删除临时包
-	UE_LOG(VersionInstallationLog, Display, TEXT("5. Delete temporary package."));
+	UE_LOG(LogVersionInstallation, Display, TEXT("5. Delete temporary package."));
 
 	DeleteResourceFile(FoundFiles);
 	DeleteResourceFile(CustomFoundFiles);

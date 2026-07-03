@@ -1,7 +1,6 @@
-﻿﻿
-
+﻿
 #include "Object/VersionUpdateObject.h"
-#include "Log/VersionUpdateLog.h"
+#include "VersionUpdateLogChannels.h"
 #include "Misc/FileHelper.h"
 #include "HttpManager.h"
 #include "VersionPakBPLibrary.h"
@@ -71,7 +70,7 @@ UVersionUpdateObject* UVersionUpdateObject::CreateObject(UClass* InClass, UObjec
 	{
 		if (UVersionUpdateObject* Obj = NewObject<UVersionUpdateObject>(InParent, InClass))
 		{
-			UE_LOG(LogVersionControl, Log, TEXT("Create an object with a parent."));
+			UE_LOG(LogVersionUpdate, Log, TEXT("Create an object with a parent."));
 			Obj->InitVersionControlObject();
 			return Obj;
 		}
@@ -83,12 +82,12 @@ UVersionUpdateObject* UVersionUpdateObject::CreateObject(UClass* InClass, UObjec
 			Obj->AddToRoot();
 			Obj->InitVersionControlObject();
 
-			UE_LOG(LogVersionControl, Log, TEXT("Create an object with a parent."));
+			UE_LOG(LogVersionUpdate, Log, TEXT("Create an object with a parent."));
 			return Obj;
 		}
 	}
 
-	UE_LOG(LogVersionControl, Error, TEXT("Creation failed for unknown reason."));
+	UE_LOG(LogVersionUpdate, Error, TEXT("Creation failed for unknown reason."));
 
 	return nullptr;
 }
@@ -126,7 +125,7 @@ bool UVersionUpdateObject::GetCurrentServerVersion(bool bSynchronous)
 	FString ServerVersionConfigURL = GetDefault<UVersionManifestClientObject>()->ServerJsonURL;
 
 
-	UE_LOG(LogVersionControl, Display, TEXT("ServerVersionConfigURL=%s"),*ServerVersionConfigURL);
+	UE_LOG(LogVersionUpdate, Display, TEXT("ServerVersionConfigURL=%s"),*ServerVersionConfigURL);
 
 	VersionUpdateHTTP::FHTTPDelegate Delegate;
 	//TODO:整理，改成判断版本函数,不要用匿名函数
@@ -155,9 +154,9 @@ bool UVersionUpdateObject::GetCurrentServerVersion(bool bSynchronous)
 			// ------------------ 处理字符串读取问题
 
 			
-			if (!VersionControl::Read(JsonStr, ServerVersionJson))
+			if (!PatchManifest::Read(JsonStr, ServerVersionJson))
 			{
-				UE_LOG(LogVersionControl, Error, TEXT("The request for object server version information failed. Please check whether the permissions of the following OSS servers are public read."));
+				UE_LOG(LogVersionUpdate, Error, TEXT("The request for object server version information failed. Please check whether the permissions of the following OSS servers are public read."));
 				OnRealTimeVersionDetectionDelegate.Broadcast(EServerVersionResponseType::CONNECTION_ERROR);
 			}else // HTTP成功时
 			{
@@ -215,7 +214,7 @@ void UVersionUpdateObject::UpdateVersion()
 			CombineURL(ServerVersionJson.Url, File.Name)
 		);
 
-		UE_LOG(LogVersionControl, Log,
+		UE_LOG(LogVersionUpdate, Log,
 			TEXT("[VersionUpdate] Need download: %s"),
 			*File.Name);
 	}
@@ -281,12 +280,12 @@ void UVersionUpdateObject::OnUpdateMajorVersion()
 
 		PendingDownloadFiles.Add(File);
 
-		UE_LOG(LogVersionControl, Warning,TEXT("[MajorUpdate][Download] %s"), *File.Name);
+		UE_LOG(LogVersionUpdate, Warning,TEXT("[MajorUpdate][Download] %s"), *File.Name);
 	}
 
 	if (PendingDownloadFiles.Num() == 0)
 	{
-		UE_LOG(LogVersionControl, Error,
+		UE_LOG(LogVersionUpdate, Error,
 			TEXT("[MajorUpdate] No MajorVersionFiles found in server manifest."));
 
 		OnRealTimeVersionDetectionDelegate.Broadcast(
@@ -334,7 +333,7 @@ void UVersionUpdateObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpR
 	// ---------- 基础校验 ----------
 	if (!bSucceeded || !HttpResponse.IsValid())
 	{
-		UE_LOG(LogVersionControl, Error,
+		UE_LOG(LogVersionUpdate, Error,
 			TEXT("[VersionUpdate] Failed to download [%s]"),
 			*HeadName);
 
@@ -372,7 +371,7 @@ void UVersionUpdateObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpR
 
 	if (!ServerFile)
 	{
-		UE_LOG(LogVersionControl, Error,
+		UE_LOG(LogVersionUpdate, Error,
 			TEXT("[VersionUpdate] No server file info found for [%s]"),
 			*HeadName);
 
@@ -403,7 +402,7 @@ void UVersionUpdateObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpR
 			const FString FinalPath =
 				FPaths::ConvertRelativePathToFull(
 					FPaths::ProjectDir() / InstallPath / HeadName);
-			UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] FinalPath=%s"), *FinalPath);
+			UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] FinalPath=%s"), *FinalPath);
 			ExistsAndCreate(FPaths::GetPath(FinalPath));
 			RelativePatchs.AddUnique(FinalPath); //Mark:需要检查一下绝对路径问题
 		}
@@ -416,12 +415,12 @@ void UVersionUpdateObject::OnRequestComplete(FHttpRequestPtr HttpRequest, FHttpR
 
 	if (!FFileHelper::SaveArrayToFile(Data, *SavePath))
 	{
-		UE_LOG(LogVersionControl, Error,TEXT("[VersionUpdate] Failed to save [%s] => %s"),*HeadName,*SavePath);
+		UE_LOG(LogVersionUpdate, Error,TEXT("[VersionUpdate] Failed to save [%s] => %s"),*HeadName,*SavePath);
 		OnObjectCompleteBPDelegate.Broadcast(HeadName);
 		return;
 	}
 
-	UE_LOG(LogVersionControl, Log,TEXT("[VersionUpdate] Saved [%s] => %s"),*HeadName,*SavePath);
+	UE_LOG(LogVersionUpdate, Log,TEXT("[VersionUpdate] Saved [%s] => %s"),*HeadName,*SavePath);
 
 
 	// ---------- 通知 ----------
@@ -433,7 +432,7 @@ void UVersionUpdateObject::OnRequestProgress(FHttpRequestPtr HttpRequest, int32 
 	FString Head = FPaths::GetCleanFilename(HttpRequest->GetURL());
 
 	float InValue = ((float)BytesReceived / (float)TotalBytes);
-	UE_LOG(LogVersionControl, Log, TEXT("[%s] : %.2lf %%"),*Head, InValue * 100.f);
+	UE_LOG(LogVersionUpdate, Log, TEXT("[%s] : %.2lf %%"),*Head, InValue * 100.f);
 
 	OnProgressDelegate.Broadcast(InValue, Head, TotalBytes, BytesReceived);
 }
@@ -446,7 +445,7 @@ void UVersionUpdateObject::OnRequestHeaderReceived(FHttpRequestPtr Request, cons
 // 只更新了版本(例如丢弃了某个包)或全部下载完成后 回调
 void UVersionUpdateObject::OnRequestsComplete()
 {
-	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] All download tasks completed."));
+	UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] All download tasks completed."));
 
 	// 是否启用无感热更新（Seamless）
 
@@ -455,7 +454,7 @@ void UVersionUpdateObject::OnRequestsComplete()
 		// ---------- 无感热更新（当前进程内安装） ----------
 		if (ExecuteInstallationProgressByUninstallAll())
 		{
-			UE_LOG(LogVersionControl, Log,
+			UE_LOG(LogVersionUpdate, Log,
 				TEXT("[VersionUpdate] Seamless installation success."));
 
 			// 同步 Client Manifest / Version
@@ -468,7 +467,7 @@ void UVersionUpdateObject::OnRequestsComplete()
 
 			if (StartupMap.IsEmpty())
 			{
-				UE_LOG(LogVersionControl, Error,
+				UE_LOG(LogVersionUpdate, Error,
 					TEXT("[VersionUpdate] Startup map is empty."));
 
 				ensure(0);
@@ -476,14 +475,14 @@ void UVersionUpdateObject::OnRequestsComplete()
 				return;
 			}
 
-			UE_LOG(LogVersionControl, Display,
+			UE_LOG(LogVersionUpdate, Display,
 				TEXT("[VersionUpdate] OpenLevel: %s"), *StartupMap);
 
 			UGameplayStatics::OpenLevel(GetWorld(), *StartupMap);
 		}
 		else
 		{
-			UE_LOG(LogVersionControl, Error,
+			UE_LOG(LogVersionUpdate, Error,
 				TEXT("[VersionUpdate] Seamless installation failed (Major version?)"));
 
 			ensure(0);
@@ -495,7 +494,7 @@ void UVersionUpdateObject::OnRequestsComplete()
 		// ---------- 独立安装程序 ----------
 		if (CallInstallationProgress())
 		{
-			UE_LOG(LogVersionControl, Log,
+			UE_LOG(LogVersionUpdate, Log,
 				TEXT("[VersionUpdate] External installer launched successfully."));
 			
 			//TODO:在独立程序里，当安装完后，更新ClientJson 中的版本号
@@ -506,7 +505,7 @@ void UVersionUpdateObject::OnRequestsComplete()
 		}
 		else
 		{
-			UE_LOG(LogVersionControl, Error,
+			UE_LOG(LogVersionUpdate, Error,
 				TEXT("[VersionUpdate] Failed to launch installation process."));
 
 			ensure(0);
@@ -522,7 +521,7 @@ void UVersionUpdateObject::OnRequestsComplete()
 // 三
 void UVersionUpdateObject::OnCompareServerPatchsList()
 {
-	UE_LOG(LogVersionControl, Log,
+	UE_LOG(LogVersionUpdate, Log,
 		TEXT("[VersionUpdate] Compare server version with local files (Server-only mode)"));
 
 	PendingDownloadFiles.Empty();
@@ -556,7 +555,7 @@ void UVersionUpdateObject::OnCompareServerPatchsList()
 				{
 					PendingDiscardFiles.Add(ServerFile);
 
-					UE_LOG(LogVersionControl, Log,TEXT("[VersionDiff][Discard] %s"),*LocalPath);
+					UE_LOG(LogVersionUpdate, Log,TEXT("[VersionDiff][Discard] %s"),*LocalPath);
 				}
 				continue;
 			}
@@ -566,17 +565,17 @@ void UVersionUpdateObject::OnCompareServerPatchsList()
 			{
 				PendingDownloadFiles.Add(ServerFile);
 
-				UE_LOG(LogVersionControl, Log,TEXT("[VersionDiff][Download][Missing] %s"),*LocalPath);
+				UE_LOG(LogVersionUpdate, Log,TEXT("[VersionDiff][Download][Missing] %s"),*LocalPath);
 			}
 			else if (LocalSize != ServerFile.Size || LocalHash != ServerFile.Hash)
 			{
 				PendingDownloadFiles.Add(ServerFile);
 
-				UE_LOG(LogVersionControl, Log,TEXT("[VersionDiff][Download][SizeMismatch] %s (Local=%lld Server=%lld)"),*LocalPath,LocalSize,ServerFile.Size);
+				UE_LOG(LogVersionUpdate, Log,TEXT("[VersionDiff][Download][SizeMismatch] %s (Local=%lld Server=%lld)"),*LocalPath,LocalSize,ServerFile.Size);
 			}
 			else
 			{
-				UE_LOG(LogVersionControl, Verbose,TEXT("[VersionCheck][Reuse] %s"),*LocalPath);
+				UE_LOG(LogVersionUpdate, Verbose,TEXT("[VersionCheck][Reuse] %s"),*LocalPath);
 			}
 		}
 	}
@@ -587,7 +586,7 @@ void UVersionUpdateObject::OnCompareServerPatchsList()
 
 	if (bHasDiff)
 	{
-		UE_LOG(LogVersionControl, Log,
+		UE_LOG(LogVersionUpdate, Log,
 			TEXT("[VersionUpdate] Version diff detected. Download=%d Discard=%d"),
 			PendingDownloadFiles.Num(),
 			PendingDiscardFiles.Num());
@@ -599,7 +598,7 @@ void UVersionUpdateObject::OnCompareServerPatchsList()
 	}
 	else
 	{
-		UE_LOG(LogVersionControl, Log,
+		UE_LOG(LogVersionUpdate, Log,
 			TEXT("[VersionUpdate] Client is up-to-date."));
 
 		OnRealTimeVersionDetectionDelegate.Broadcast(
@@ -610,12 +609,12 @@ void UVersionUpdateObject::OnCompareServerPatchsList()
 // 无感更新
 bool UVersionUpdateObject::ExecuteInstallationProgressByUninstallAll()
 {
-	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] ExecuteInstallationProgressByUninstallAll"));
+	UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] ExecuteInstallationProgressByUninstallAll"));
 
 	// 1️⃣ 卸载当前已加载的 Pak
 	if (!UnLoadAllPak())
 	{
-		UE_LOG(LogVersionControl, Error, TEXT("[VersionUpdate] UnLoadAllPak failed."));
+		UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] UnLoadAllPak failed."));
 		return false;
 	}
 
@@ -642,7 +641,7 @@ bool UVersionUpdateObject::ExecuteInstallationProgressByUninstallAll()
 		}
 	}
 
-	UE_LOG(LogVersionControl, Log,TEXT("[VersionUpdate] PakNumber=%f CustomPakNumber=%f"),PakNumber, CustomPakNumber);
+	UE_LOG(LogVersionUpdate, Log,TEXT("[VersionUpdate] PakNumber=%f CustomPakNumber=%f"),PakNumber, CustomPakNumber);
 
 	// 构建 DiscardInfo
 	TArray<FRemotePatchFile> DiscardInfo = PendingDiscardFiles;
@@ -665,18 +664,18 @@ bool UVersionUpdateObject::ExecuteInstallationProgressByUninstallAll()
 
 	if (!bInstallOK)
 	{
-		UE_LOG(LogVersionControl, Error, TEXT("[VersionUpdate] HandleHotInstallation failed."));
+		UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] HandleHotInstallation failed."));
 		return false;
 	}
 
 	// 6️⃣ 重新加载 Pak ，无感更新需要
 	if (!LoadAllPakCache())
 	{
-		UE_LOG(LogVersionControl, Error, TEXT("[VersionUpdate] LoadAllPakCache failed."));
+		UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] LoadAllPakCache failed."));
 		return false;
 	}
 
-	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] Seamless installation completed."));
+	UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] Seamless installation completed."));
 	return true;
 }
 
@@ -689,12 +688,12 @@ bool UVersionUpdateObject::UnLoadAllPak()
 	{
 		if (!UVersionPakBPLibrary::UnmountPak(Tmp))
 		{
-			UE_LOG(LogVersionControl, Error, TEXT("[VersionUpdate] Failed to uninstall package .%s"), *Tmp);
+			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to uninstall package .%s"), *Tmp);
 			return false;
 		}
 		else
 		{
-			UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] Successfully uninstalled package. %s"), *Tmp);
+			UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] Successfully uninstalled package. %s"), *Tmp);
 		}
 	}
 	return true;
@@ -708,11 +707,11 @@ bool UVersionUpdateObject::LoadAllPakCache()
 		{
 			if (!UVersionPakBPLibrary::MountPak(Tmp, 0, TEXT("")))
 			{
-				UE_LOG(LogVersionControl, Error, TEXT("Installation failed It may have been uninstalled.%s"), *Tmp);
+				UE_LOG(LogVersionUpdate, Error, TEXT("Installation failed It may have been uninstalled.%s"), *Tmp);
 			}
 			else
 			{
-				UE_LOG(LogVersionControl, Log, TEXT("Successfully installed package. %s"), *Tmp);
+				UE_LOG(LogVersionUpdate, Log, TEXT("Successfully installed package. %s"), *Tmp);
 			}
 		}
 	}
@@ -746,7 +745,7 @@ bool UVersionUpdateObject::CallInstallationProgress()
 				FPaths::ProjectDir() / File.InstallDir / File.Name);
 		DiscardsPathsStr += DiscardsAbsolutePath + TEXT("|");
 
-		UE_LOG(LogVersionControl, Log,
+		UE_LOG(LogVersionUpdate, Log,
 			TEXT("[Discard] %s"), *DiscardsAbsolutePath);
 	}
 
@@ -768,7 +767,7 @@ bool UVersionUpdateObject::CallInstallationProgress()
 
 	if (!FPaths::FileExists(ExePath))
 	{
-		UE_LOG(LogVersionControl, Error, TEXT("Installer not found: %s"), *ExePath);
+		UE_LOG(LogVersionUpdate, Error, TEXT("Installer not found: %s"), *ExePath);
 		return false;
 	}
 
@@ -823,8 +822,8 @@ bool UVersionUpdateObject::CallInstallationProgress()
 		nullptr
 	);
 
-	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] [InstallerExe] %s"), *ExePath);
-	UE_LOG(LogVersionControl, Log, TEXT("[VersionUpdate] [InstallerParam] %s"), *Param);
+	UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] [InstallerExe] %s"), *ExePath);
+	UE_LOG(LogVersionUpdate, Log, TEXT("[VersionUpdate] [InstallerParam] %s"), *Param);
 
 	return Handle.IsValid();
 }

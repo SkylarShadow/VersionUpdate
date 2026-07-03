@@ -1,8 +1,7 @@
-﻿﻿
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Version/CtrlVersion.h"
+#include "Version/PatchManifest.h"
 #include "HTTP/VersionUpdateHTTP.h"
 #include "VersionUpdateType.h"
 #include "Settings/VersionManifestClientObject.h"

@@ -32,7 +32,7 @@
 			]
 		},
 		{
-			"Name": "VersionObject",
+			"Name": "VersionManifest",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
 			"WhitelistPlatforms": [
@@ -54,6 +54,6 @@
 		"WhitelistPlatforms": [
 			"Win64"
 		]
-},
+}
 	]
 }

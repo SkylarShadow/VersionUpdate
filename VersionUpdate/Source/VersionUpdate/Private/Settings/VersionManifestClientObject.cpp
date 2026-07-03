@@ -6,7 +6,7 @@
 #include "Json.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Version/CtrlVersion.h"
+#include "Version/PatchManifest.h"
 
 namespace VersionClientJson
 {
@@ -23,7 +23,7 @@ namespace VersionClientJson
 		Writer->WriteArrayStart(TEXT("installedPatchFiles"));
 		for (const FRemotePatchFile& File : Info.InstalledPatchFiles)
 		{
-			VersionControl::WritePatchFile(Writer, File);
+			PatchManifest::WritePatchFile(Writer, File);
 		}
 		Writer->WriteArrayEnd();
 
@@ -54,7 +54,7 @@ namespace VersionClientJson
 			for (const auto& FileValue : *Files)
 			{
 				FRemotePatchFile File;
-				VersionControl::ReadPatchFile(FileValue->AsObject(), File);
+				PatchManifest::ReadPatchFile(FileValue->AsObject(), File);
 				OutInfo.InstalledPatchFiles.Add(MoveTemp(File));
 			}
 		}

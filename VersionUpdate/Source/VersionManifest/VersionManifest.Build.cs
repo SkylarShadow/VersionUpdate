@@ -1,9 +1,9 @@
 ﻿using System.IO;
 using UnrealBuildTool;
 
-public class VersionObject : ModuleRules
+public class VersionManifest : ModuleRules
 {
-    public VersionObject(ReadOnlyTargetRules Target) : base(Target)
+    public VersionManifest(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
