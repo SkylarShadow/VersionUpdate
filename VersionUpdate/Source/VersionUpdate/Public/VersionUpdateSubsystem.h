@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HTTP/VersionUpdateHTTP.h"
 #include "Settings/VersionManifestClientObject.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "UnHTTPType.h"
 #include "Version/PatchManifest.h"
 #include "VersionUpdateType.h"
 #include "VersionUpdateSubsystem.generated.h"
@@ -11,10 +11,87 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVersionUpdateInitializedDelegate, const FString&, CurrentVersion);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnlineVersionCheckRequestedDelegate, const FString&, ManifestURL);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVersionCheckCompletedDelegate, EServerVersionResponseType, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FVersionDownloadProgressDelegate, float, Percentage, const FString&, FileName, int32, TotalBytes, int32, BytesReceived);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FVersionDownloadProgressDelegate, float, Percentage, const FString&, FileName, int64, TotalBytes, int64, BytesReceived);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPatchFileDownloadCompletedDelegate, const FString&, FileName, bool, bSucceeded);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVersionDownloadCompletedDelegate, bool, bSucceeded);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVersionInstallCompletedDelegate, bool, bSucceeded);
+
+struct FVersionUpdateDownloadChunk
+{
+	// 该分片所属的文件名，用于日志和单文件完成事件。
+	FString FileName;
+
+	// 该分片请求的完整下载 URL。
+	FString URL;
+
+	// HTTP Range 请求头，例如 bytes=0-8388607；为空时表示整文件下载。
+	FString RangeHeader;
+
+	// 当前分片临时落盘路径，成功后会被合并进 .part 文件。
+	FString ChunkPath;
+
+	// UnHTTP 返回的请求句柄，用于 fallback 时尽量取消仍在运行的 Range 请求。
+	FName RequestHandle;
+
+	// 当前分片在目标文件中的起始字节位置。
+	int64 Start = 0;
+
+	// 当前分片在目标文件中的结束字节位置，包含该字节。
+	int64 End = 0;
+
+	// UnHTTP 进度回调中当前分片已收到的字节数。
+	uint64 BytesReceived = 0;
+
+	// 该分片是否已经结束；成功和失败都会标记为完成。
+	bool bCompleted = false;
+
+	// 该分片是否下载并保存成功。
+	bool bSucceeded = false;
+
+	// 是否是无 Range 的整文件请求；用于 Size<=0 或服务端不支持 Range 的 fallback。
+	bool bFullFileRequest = false;
+
+	int64 GetExpectedSize() const
+	{
+		return End >= Start ? End - Start + 1 : 0;
+	}
+};
+
+struct FVersionUpdateDownloadFileState
+{
+	// Manifest 中描述的远端文件信息，包含名称、大小、Hash、安装目录等。
+	FRemotePatchFile File;
+
+	// 当前文件的完整下载 URL。
+	FString URL;
+
+	// 当前文件名，作为 ActiveDownloadFiles 的 key。
+	FString FileName;
+
+	// 下载成功后的最终临时文件路径，安装阶段会从这里取文件。
+	FString SavePath;
+
+	// 可续传的主临时文件路径；已确认顺序正确的内容会追加到这里。
+	FString PartPath;
+
+	// 本轮开始前 .part 文件已有的字节数，作为断点续传起点。
+	int64 ExistingBytes = 0;
+
+	// 已完成的分片数量，仅用于调试观察，当前流程主要依赖 Chunks 状态。
+	int32 CompletedChunks = 0;
+
+	// 当前文件是否已有任意分片、合并、校验或移动失败。
+	bool bFailed = false;
+
+	// 是否已经广播过该文件的 OnPatchFileDownloadCompleted，防止重复广播。
+	bool bReported = false;
+
+	// 是否已发现服务端不支持 Range，并切换到无 Range 整文件下载。
+	bool bFallbackToFullDownload = false;
+
+	// 当前文件的所有分片任务，包括 Range 分片和可能追加的整文件 fallback 任务。
+	TArray<FVersionUpdateDownloadChunk> Chunks;
+};
 
 /**
  * 事件驱动版本更新子系统。
@@ -140,9 +217,14 @@ private:
 	FString GetDownloadPathToCustom() const;
 
 	// 内置批量下载回调。
-	void OnDownloadRequestComplete(FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded);
-	void OnDownloadRequestProgress(FHttpRequestPtr HttpRequest, int32 TotalBytes, int32 BytesReceived);
-	void OnDownloadRequestsComplete();
+	void QueueResumableDownload(const FRemotePatchFile& File);
+	void StartQueuedDownloadChunks();
+	bool StartDownloadChunk(const FString& ChunkKey);
+	bool StartFullFileDownloadFallback(const FString& FileName);
+	void OnDownloadChunkComplete(const FString& ChunkKey, const FUnHttpRequest& Request, const FUnHttpResponse& Response, bool bSucceeded);
+	void OnDownloadChunkProgress(const FString& ChunkKey, const FUnHttpRequest& Request, uint64 BytesSent, uint64 BytesReceived);
+	void FinishDownloadFileIfReady(const FString& FileName);
+	void FinishAllDownloadsIfReady();
 
 	// 安装实现：无感安装或外部安装器。
 	bool ExecuteSeamlessInstall();
@@ -173,4 +255,25 @@ private:
 	TArray<FRemotePatchFile> PendingDiscardFiles;
 	TArray<FString> RelativePatchs;
 	TArray<FString> MountedPakCache;
+
+	// 本轮正在处理的文件下载状态，key 是文件名；要求同一轮下载内文件名唯一。
+	TMap<FString, FVersionUpdateDownloadFileState> ActiveDownloadFiles;
+
+	// 分片 key 到文件名的反查表；分片回调只拿 ChunkKey，再通过这里找回文件状态。
+	TMap<FString, FString> ActiveDownloadChunkToFile;
+
+	// 分片 key 到 Chunks 数组下标的反查表。
+	TMap<FString, int32> ActiveDownloadChunkIndex;
+
+	// 等待启动的分片 key 队列。
+	TArray<FString> PendingDownloadChunkKeys;
+
+	// 已发起但尚未收到完成回调的分片 key 集合。
+	TSet<FString> RunningDownloadChunkKeys;
+
+	// 已经结束生命周期的分片任务数；成功、失败、启动失败都会计入。
+	int32 CompletedDownloadChunkCount = 0;
+
+	// 当前仍需要纳入统计的分片任务总数；fallback 会移除旧任务并添加整文件任务。
+	int32 TotalDownloadChunkCount = 0;
 };

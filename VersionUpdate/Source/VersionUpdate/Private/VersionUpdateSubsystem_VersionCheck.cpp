@@ -1,15 +1,15 @@
 #include "VersionUpdateSubsystem.h"
 
-#include "HttpManager.h"
 #include "Settings/VersionManifestClientObject.h"
+#include "UnHTTPManage.h"
 #include "VersionUpdateLogChannels.h"
 
 namespace
 {
 	// HTTP 返回内容可能带 UTF-8 BOM，解析 JSON 前先移除，避免 PatchManifest::Read 失败。
-	FString GetHttpResponseString(const FHttpResponsePtr& Response)
+	FString GetHttpResponseString(const TArray<uint8>& RawContent)
 	{
-		TArray<uint8> Raw = Response->GetContent();
+		TArray<uint8> Raw = RawContent;
 		if (Raw.Num() >= 3 && Raw[0] == 0xEF && Raw[1] == 0xBB && Raw[2] == 0xBF)
 		{
 			Raw.RemoveAt(0, 3);
@@ -52,37 +52,30 @@ bool UVersionUpdateSubsystem::RequestServerManifestByInternalHttp(bool bSynchron
 
 	TSharedRef<bool, ESPMode::ThreadSafe> bRequestFinished = MakeShared<bool, ESPMode::ThreadSafe>(false);
 	
-	//获取json
-	VersionUpdateHTTP::FHTTPDelegate Delegate;
-	Delegate.HttpCompleteDelegate.BindLambda([this, bRequestFinished](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bConnected)
+	// 使用 UnHTTP 获取服务器 Manifest。外部下载方式仍然可以直接调用 SubmitServerManifestJson/SubmitServerManifest 注入结果。
+	FUnHTTPResponseDelegate Delegate;
+	Delegate.SingleCompleteDelegate.BindLambda([this, bRequestFinished](const FUnHttpRequest& Request, const FUnHttpResponse& Response, bool bConnected)
 	{
 		*bRequestFinished = true;
 
-		if (!bConnected || !Response.IsValid())
+		if (!bConnected || Response.ResponseCode < 200 || Response.ResponseCode >= 300 || !Response.Content)
 		{
 			// 网络或响应对象无效，统一广播连接错误。
 			OnVersionCheckCompleted.Broadcast(EServerVersionResponseType::CONNECTION_ERROR);
 			return;
 		}
 
-		SubmitServerManifestJson(GetHttpResponseString(Response), true);
+		SubmitServerManifestJson(GetHttpResponseString(Response.Content->GetContent()), true);
 	});
 
-	const bool bHTTPObjectCreated = VersionUpdateHTTP::FHTTP::CreateHTTPObject(Delegate)->GetObjectToMemory(ManifestURL);
-	if (!bHTTPObjectCreated)
+	if (!UN_HTTP.GetObjectToMemory(Delegate, ManifestURL, bSynchronous))
 	{
-		// HTTP 对象创建/发起失败，也按连接错误处理。
+		// HTTP 请求发起失败，也按连接错误处理。
 		OnVersionCheckCompleted.Broadcast(EServerVersionResponseType::CONNECTION_ERROR);
 		return false;
 	}
 
-	if (bSynchronous)
-	{
-		FHttpModule::Get().GetHttpManager().Flush(EHttpFlushReason::Default);
-		return *bRequestFinished;
-	}
-
-	return true;
+	return bSynchronous ? *bRequestFinished : true;
 }
 
 EServerVersionResponseType UVersionUpdateSubsystem::SubmitServerManifestJson(const FString& InServerManifestJson, bool bEvaluateImmediately)

@@ -27,6 +27,7 @@ public class VersionUpdate : ModuleRules
 			{
                 "Core",
                 "HTTP",
+                "UnHTTP",
                 "VersionPak",
                 "VersionManifest",
                 "VersionInstallation"
