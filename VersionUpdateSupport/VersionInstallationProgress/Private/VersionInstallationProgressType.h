@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Version/CtrlVersion.h"
+#include "Version/PatchManifest.h"
 
 FString LinkURL;
 FString ResourcesToCopiedCustom;

@@ -21,12 +21,24 @@ namespace
 		const FString PlatformName = FPlatformProperties::PlatformName();
 		return PlatformName.Contains(TEXT("Windows")) ? TEXT("Win64") : PlatformName;
 	}
+	
+	FString GetInstallRelativeFilePath(const FRemotePatchFile& File)
+	{
+		// InstalledPatchFiles 需要按最终安装位置去重，不能只比较 Name。
+		FString InstallDir = File.InstallDir;
+		FPaths::NormalizeFilename(InstallDir);
+		InstallDir.RemoveFromStart(TEXT("/"));
+		InstallDir.RemoveFromEnd(TEXT("/"));
+		return InstallDir.IsEmpty() ? File.Name : InstallDir / File.Name;
+	}
 
 	// 丢弃文件需要转换成本地绝对路径传给安装器。
-	FString GetInstallProjectFilePath(const FRemotePatchFile& File)
+	FString GetInstallAbsoluteFilePath(const FRemotePatchFile& File)
 	{
-		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / File.InstallDir / File.Name);
+		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / GetInstallRelativeFilePath(File));
 	}
+
+
 
 	// IFileManager::Copy 的进度回调。这里按文件数量平均累加整体安装进度。
 	struct FPakInstallationProgress : public FCopyProgress
@@ -55,9 +67,10 @@ float UVersionUpdateSubsystem::GetInstallationProgress() const
 	return VersionUpdateInstallationProgressValue;
 }
 
+// 每次版本检测或安装前重置，避免上一次安装进度残留。
 void UVersionUpdateSubsystem::ResetInstallationProgress()
 {
-	// 每次版本检测或安装前重置，避免上一次安装进度残留。
+
 	PakNumber = 0.f;
 	CustomPakNumber = 0.f;
 	LastFraction = 0.f;
@@ -65,9 +78,9 @@ void UVersionUpdateSubsystem::ResetInstallationProgress()
 	VersionUpdateInstallationProgressValue = 0.f;
 }
 
+// 安装下载文件，业务层可以在下载完后调用此函数进行安装
 bool UVersionUpdateSubsystem::InstallDownloadedFiles()
 {
-	// 事件驱动入口：业务层决定何时调用安装，而不是下载完成后自动安装。
 	const bool bSucceeded = bSeamlessHotUpdate ? ExecuteSeamlessInstall() : LaunchExternalInstaller();
 	OnVersionInstallCompleted.Broadcast(bSucceeded);
 	return bSucceeded;
@@ -75,21 +88,19 @@ bool UVersionUpdateSubsystem::InstallDownloadedFiles()
 
 bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 {
+	ResetInstallationProgress();
+
 	// 无感安装会在当前进程内覆盖资源，因此先卸载已挂载 Pak，避免文件占用。
 	if (!UnmountMountedPaks())
 	{
 		return false;
 	}
 
-	PakNumber = 0.f;
-	CustomPakNumber = 0.f;
-
 	// 临时下载目录和最终安装目录。
 	const FString ResourcesToCopiedCustom = GetDownloadPathToCustom();
 	const FString ResourcesToCopied = GetDownloadPathToPak();
 	const FString ProjectToContentPaks = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("Paks"));
 	const FString ProjectRootPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-	const TArray<FRemotePatchFile> DiscardInfo = PendingDiscardFiles;
 
 	// 执行复制、删除临时文件、处理废弃文件等安装动作。
 	const bool bInstallOK = FVersionInstallationManage().HandleHotInstallation<FPakInstallationProgress>(
@@ -98,7 +109,8 @@ bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 		ProjectToContentPaks,
 		ProjectRootPath,
 		RelativePatchs,
-		DiscardInfo,
+		PendingDownloadFiles,
+		PendingDiscardFiles,
 		PakNumber,
 		CustomPakNumber,
 		VersionUpdateInstallationProgressValue);
@@ -110,7 +122,12 @@ bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 	}
 
 	// 安装成功后持久化客户端状态。
-	SaveClientManifest();
+	// 先更新内存中的安装结果，再写 json；写入失败时仍按安装失败处理，避免本地状态失真。
+	UpdateClientManifestAfterInstall();
+	if (!SaveClientManifest())
+	{
+		return false;
+	}
 
 	const FString StartupMap = GetDefault<UGameMapsSettings>()->GetGameDefaultMap();
 	if (!StartupMap.IsEmpty())
@@ -122,6 +139,102 @@ bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 	return true;
 }
 
+// 当前 Manifest 没有独立的目标客户端版本字段。
+// 热更新路径下，这里约定使用最后一个补丁版本作为安装完成后的本地版本号。
+FString UVersionUpdateSubsystem::GetInstalledTargetVersion() const
+{
+	for (int32 Index = ServerManifest.Patches.Num() - 1; Index >= 0; --Index)
+	{
+		if (!ServerManifest.Patches[Index].Version.IsEmpty())
+		{
+			return ServerManifest.Patches[Index].Version;
+		}
+	}
+
+	return CurrentVersion;
+}
+
+void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
+{
+	// 本地 json 记录的是“已经安装到磁盘上的版本”，不是当前进程启动时的旧版本。
+	ClientManifest.CurrentVersion = GetInstalledTargetVersion();
+
+	TMap<FString, FRemotePatchFile> InstalledFilesByPath;
+	for (const FRemotePatchFile& InstalledFile : ClientManifest.InstalledPatchFiles)
+	{
+		if (!InstalledFile.Name.IsEmpty())
+		{
+			InstalledFilesByPath.Add(GetInstallRelativeFilePath(InstalledFile), InstalledFile);
+		}
+	}
+
+	TSet<FString> DiscardKeys;
+	auto MarkDiscarded = [&DiscardKeys, &InstalledFilesByPath](const FRemotePatchFile& File)
+	{
+		if (File.Name.IsEmpty())
+		{
+			return;
+		}
+
+		const FString FileKey = GetInstallRelativeFilePath(File);
+		DiscardKeys.Add(FileKey);
+		InstalledFilesByPath.Remove(FileKey);
+	};
+
+	// 先收集所有应从 InstalledPatchFiles 中删除的目标路径。
+	// 这里只记录路径 key，不直接删除文件；物理删除由安装器完成。
+	for (const FRemotePatchFile& DiscardFile : PendingDiscardFiles)
+	{
+		MarkDiscarded(DiscardFile);
+	}
+
+	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
+	{
+		for (const FRemotePatchFile& ServerFile : PatchVersion.Files)
+		{
+			if (ServerFile.bDiscard)
+			{
+				MarkDiscarded(ServerFile);
+			}
+		}
+	}
+
+	auto AddInstalled = [&DiscardKeys, &InstalledFilesByPath](const FRemotePatchFile& InstalledFile)
+	{
+		const FString InstalledKey = GetInstallRelativeFilePath(InstalledFile);
+		// 同一路径只保留一条记录；如果该路径被标记为丢弃，则不再写回 InstalledPatchFiles。
+		if (InstalledFile.Name.IsEmpty() || InstalledFile.bDiscard || DiscardKeys.Contains(InstalledKey))
+		{
+			return;
+		}
+
+		InstalledFilesByPath.Add(InstalledKey, InstalledFile);
+	};
+
+	// 先移除所有废弃项，再重建应保留的文件列表，避免旧版本记录残留。
+	// 服务端补丁列表描述热更新后应存在的完整文件集合，先按它重建基础状态。
+	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
+	{
+		for (const FRemotePatchFile& ServerFile : PatchVersion.Files)
+		{
+			AddInstalled(ServerFile);
+		}
+	}
+
+	// 再用本轮实际下载的文件覆盖一次，确保 Hash / Size 等元数据与本次安装目标一致。
+	for (const FRemotePatchFile& InstalledFile : PendingDownloadFiles)
+	{
+		AddInstalled(InstalledFile);
+	}
+
+	ClientManifest.InstalledPatchFiles.Reset();
+	InstalledFilesByPath.GenerateValueArray(ClientManifest.InstalledPatchFiles);
+	ClientManifest.InstalledPatchFiles.Sort([](const FRemotePatchFile& Left, const FRemotePatchFile& Right)
+	{
+		return GetInstallRelativeFilePath(Left) < GetInstallRelativeFilePath(Right);
+	});
+}
+
 bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 {
 	// 外部安装器需要知道哪些本地文件应被删除。
@@ -130,7 +243,7 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 	{
 		if (!File.Name.IsEmpty())
 		{
-			DiscardsPathsStr += GetInstallProjectFilePath(File) + TEXT("|");
+			DiscardsPathsStr += GetInstallAbsoluteFilePath(File) + TEXT("|");
 		}
 	}
 

@@ -147,8 +147,6 @@ EServerVersionResponseType UVersionUpdateSubsystem::ComparePatchFiles()
 			const FString LocalPath = GetVersionCheckProjectFilePath(ServerFile);
 			const bool bLocalExists = FPaths::FileExists(LocalPath);
 			const int64 LocalSize = bLocalExists ? IFileManager::Get().FileSize(*LocalPath) : INDEX_NONE;
-			const FString LocalHash = bLocalExists ? LexToString(FMD5Hash::HashFile(*LocalPath)) : TEXT("");
-
 			if (ServerFile.bDiscard)
 			{
 				if (bLocalExists)
@@ -159,7 +157,14 @@ EServerVersionResponseType UVersionUpdateSubsystem::ComparePatchFiles()
 				continue;
 			}
 
-			if (!bLocalExists || LocalSize != ServerFile.Size || LocalHash != ServerFile.Hash)
+			bool bNeedsDownload = !bLocalExists || LocalSize != ServerFile.Size;
+			if (!bNeedsDownload && !ServerFile.Hash.IsEmpty())
+			{
+				const FString LocalHash = LexToString(FMD5Hash::HashFile(*LocalPath));
+				bNeedsDownload = !LocalHash.Equals(ServerFile.Hash, ESearchCase::IgnoreCase);
+			}
+
+			if (bNeedsDownload)
 			{
 				// 文件缺失、大小不一致或 Hash 不一致，都需要重新下载。
 				PendingDownloadFiles.Add(ServerFile);

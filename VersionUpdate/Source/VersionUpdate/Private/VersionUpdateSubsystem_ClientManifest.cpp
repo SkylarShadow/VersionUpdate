@@ -30,8 +30,6 @@ void UVersionUpdateSubsystem::LoadOrCreateClientManifest()
 bool UVersionUpdateSubsystem::SaveClientManifest()
 {
 	// 保存前同步权威版本号。安装完成后调用时，可记录当前已安装到的版本。
-	ClientManifest.CurrentVersion = CurrentVersion;
-
 	FString Json;
 	const FString FilePath = GetClientManifestPath();
 	if (!VersionClientJson::Save(ClientManifest, Json))

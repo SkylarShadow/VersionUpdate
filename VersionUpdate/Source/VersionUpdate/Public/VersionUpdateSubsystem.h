@@ -231,6 +231,8 @@ private:
 	bool LaunchExternalInstaller();
 	bool UnmountMountedPaks();
 	bool RemountCachedPaks();
+	FString GetInstalledTargetVersion() const;
+	void UpdateClientManifestAfterInstall();
 
 	// 初始化本地 ClientManifest，不存在时创建。
 	void LoadOrCreateClientManifest();

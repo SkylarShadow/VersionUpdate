@@ -17,6 +17,6 @@ public class VersionInstallationProgress : ModuleRules
 		PrivateDependencyModuleNames.Add("SlateCore");
 		PrivateDependencyModuleNames.Add("StandaloneRenderer");
 		PrivateDependencyModuleNames.Add("UnThread");
-		PrivateDependencyModuleNames.Add("VersionObject");
+		PrivateDependencyModuleNames.Add("VersionManifest");
 	}
 }
