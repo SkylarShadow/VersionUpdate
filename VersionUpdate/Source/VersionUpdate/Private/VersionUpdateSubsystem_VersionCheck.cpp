@@ -24,7 +24,28 @@ namespace
 	// 版本检测阶段需要按 Manifest 描述定位本地文件，用于 Size / Hash 对比。
 	FString GetVersionCheckProjectFilePath(const FRemotePatchFile& File)
 	{
-		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / File.InstallDir / File.Name);
+		return PatchManifest::GetInstallAbsolutePath(File, FPaths::ProjectDir());
+	}
+
+	void RemoveRemoteFileByKey(TArray<FRemotePatchFile>& Files, const FString& FileKey)
+	{
+		Files.RemoveAll([&FileKey](const FRemotePatchFile& ExistingFile)
+		{
+			return PatchManifest::GetInstallRelativePath(ExistingFile).Equals(FileKey, ESearchCase::IgnoreCase);
+		});
+	}
+
+	// 同一路径后加入的记录覆盖先加入的记录；大版本基础文件先入队，补丁文件后入队。
+	void AddOrReplaceRemoteFile(TArray<FRemotePatchFile>& Files, const FRemotePatchFile& File)
+	{
+		if (File.Name.IsEmpty())
+		{
+			return;
+		}
+
+		const FString FileKey = PatchManifest::GetInstallRelativePath(File);
+		RemoveRemoteFileByKey(Files, FileKey);
+		Files.Add(File);
 	}
 }
 
@@ -133,7 +154,16 @@ EServerVersionResponseType UVersionUpdateSubsystem::ComparePatchFiles()
 	PendingDownloadFiles.Empty();
 	PendingDiscardFiles.Empty();
 	RelativePatchs.Empty();
+	CollectPatchFileDifferences();
 
+	// 有下载或废弃任务即视为需要热更新，否则认为客户端文件已是最新。
+	return (PendingDownloadFiles.Num() > 0 || PendingDiscardFiles.Num() > 0)
+		? EServerVersionResponseType::VERSION_HOTUPDATE
+		: EServerVersionResponseType::VERSION_EQUAL;
+}
+
+void UVersionUpdateSubsystem::CollectPatchFileDifferences()
+{
 	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
 	{
 		// Patches 可以包含多个补丁版本；这里不按版本号排序或截断，而是以服务器下发的文件清单为准。
@@ -146,43 +176,32 @@ EServerVersionResponseType UVersionUpdateSubsystem::ComparePatchFiles()
 
 			const FString LocalPath = GetVersionCheckProjectFilePath(ServerFile);
 			const bool bLocalExists = FPaths::FileExists(LocalPath);
-			const int64 LocalSize = bLocalExists ? IFileManager::Get().FileSize(*LocalPath) : INDEX_NONE;
 			if (ServerFile.bDiscard)
 			{
+				const FString FileKey = PatchManifest::GetInstallRelativePath(ServerFile);
+				RemoveRemoteFileByKey(PendingDownloadFiles, FileKey);
+
 				if (bLocalExists)
 				{
 					// 服务器标记为废弃且本地存在，安装阶段会处理删除。
-					PendingDiscardFiles.Add(ServerFile);
+					AddOrReplaceRemoteFile(PendingDiscardFiles, ServerFile);
 				}
 				continue;
 			}
 
-			bool bNeedsDownload = !bLocalExists || LocalSize != ServerFile.Size;
-			if (!bNeedsDownload && !ServerFile.Hash.IsEmpty())
-			{
-				const FString LocalHash = LexToString(FMD5Hash::HashFile(*LocalPath));
-				bNeedsDownload = !LocalHash.Equals(ServerFile.Hash, ESearchCase::IgnoreCase);
-			}
-
-			if (bNeedsDownload)
+			if (!PatchManifest::IsLocalFileMatched(LocalPath, ServerFile))
 			{
 				// 文件缺失、大小不一致或 Hash 不一致，都需要重新下载。
-				PendingDownloadFiles.Add(ServerFile);
+				AddOrReplaceRemoteFile(PendingDownloadFiles, ServerFile);
 			}
 		}
 	}
-
-	// 有下载或废弃任务即视为需要热更新，否则认为客户端文件已是最新。
-	return (PendingDownloadFiles.Num() > 0 || PendingDiscardFiles.Num() > 0)
-		? EServerVersionResponseType::VERSION_HOTUPDATE
-		: EServerVersionResponseType::VERSION_EQUAL;
 }
 
 EServerVersionResponseType UVersionUpdateSubsystem::PrepareMajorVersionUpdate()
 {
-	// 大版本更新不做普通 Patches 差异比较，直接使用服务器 MajorVersionFiles。
+	// 大版本更新先下载基础大版本文件，再复用普通补丁差异逻辑，把基于该大版本的补丁也补齐。
 	// 这里生成的下载队列通常交给外部安装器处理，避免在当前进程内替换代码/蓝图相关文件。
-	//TODO: 清理旧文件和直接安装各个小版本
 	
 	bSeamlessHotUpdate = false;
 	PendingDownloadFiles.Empty();
@@ -193,11 +212,45 @@ EServerVersionResponseType UVersionUpdateSubsystem::PrepareMajorVersionUpdate()
 	{
 		if (!File.Name.IsEmpty())
 		{
-			PendingDownloadFiles.Add(File);
+			// MajorVersionFiles 是跨大版本更新的基础文件，默认强制下载；后续补丁若同路径会覆盖这里的记录。
+			AddOrReplaceRemoteFile(PendingDownloadFiles, File);
 		}
 	}
 
-	return PendingDownloadFiles.Num() > 0
+	CollectPatchFileDifferences();
+
+	return (PendingDownloadFiles.Num() > 0 || PendingDiscardFiles.Num() > 0)
 		? EServerVersionResponseType::MAJORVERSION_UPDATE
 		: EServerVersionResponseType::CONNECTION_ERROR;
+}
+
+FString UVersionUpdateSubsystem::GetLatestServerVersion() const
+{
+	FString LatestVersion;
+	auto TryUseVersion = [&LatestVersion](const FString& CandidateVersion)
+	{
+		if (CandidateVersion.IsEmpty())
+		{
+			return;
+		}
+
+		if (LatestVersion.IsEmpty() || PatchManifest::CompareVersion(CandidateVersion, LatestVersion) > 0)
+		{
+			LatestVersion = CandidateVersion;
+		}
+	};
+
+	// Patches 通常是目标版本号的主要来源。
+	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
+	{
+		TryUseVersion(PatchVersion.Version);
+	}
+
+	// 兼容当前 Manifest 约定：SupportVersions 里也可能包含服务端当前版本，取最大值作为最终安装版本。
+	for (const FString& SupportVersion : ServerManifest.SupportVersions)
+	{
+		TryUseVersion(SupportVersion);
+	}
+
+	return LatestVersion.IsEmpty() ? CurrentVersion : LatestVersion;
 }

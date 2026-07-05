@@ -103,6 +103,10 @@ struct VERSIONMANIFEST_API FPatchList
 
 namespace PatchManifest
 {
+	VERSIONMANIFEST_API FString GetInstallRelativePath(const FRemotePatchFile& File);
+	VERSIONMANIFEST_API FString GetInstallAbsolutePath(const FRemotePatchFile& File, const FString& RootPath);
+	VERSIONMANIFEST_API bool IsLocalFileMatched(const FString& FilePath, const FRemotePatchFile& File);
+	VERSIONMANIFEST_API int32 CompareVersion(const FString& LeftVersion, const FString& RightVersion);
 	VERSIONMANIFEST_API void WritePatchFile(TSharedRef<TJsonWriter<>> Writer, const FRemotePatchFile& File);
 	VERSIONMANIFEST_API void ReadPatchFile(const TSharedPtr<FJsonObject>& Obj, FRemotePatchFile& Out);
 	VERSIONMANIFEST_API void Save(const FPatchList& Info, FString& OutJson);

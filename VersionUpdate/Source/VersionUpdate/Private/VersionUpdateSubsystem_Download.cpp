@@ -45,16 +45,6 @@ namespace
 		return Result / FileName;
 	}
 
-	// 非 Pak 文件最终要安装到 Manifest 指定目录，因此下载时提前记录目标路径
-	FString GetCustomInstallPath(const FRemotePatchFile& File, const FString& FileName)
-	{
-		FString InstallPath = File.InstallDir;
-		FPaths::NormalizeFilename(InstallPath);
-		InstallPath.RemoveFromStart(TEXT("/"));
-		InstallPath.RemoveFromEnd(TEXT("/"));
-		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / InstallPath / FileName);
-	}
-
 	// HTTP Range 标准格式：bytes=起始字节-结束字节，服务端支持时应返回 206
 	FString MakeRangeHeader(int64 Start, int64 End)
 	{
@@ -65,23 +55,6 @@ namespace
 	FString MakeChunkKey(const FString& URL, const FString& RangeHeader)
 	{
 		return URL + TEXT("|") + RangeHeader;
-	}
-
-	bool IsFileMatched(const FString& FilePath, const FRemotePatchFile& File)
-	{
-		// 完整文件复用必须同时满足：文件存在、大小一致、Hash 一致。
-		// Hash 为空时只做大小校验，兼容 Manifest 未生成 Hash 的旧数据。
-		if (!FPaths::FileExists(FilePath))
-		{
-			return false;
-		}
-
-		if (File.Size > 0 && IFileManager::Get().FileSize(*FilePath) != File.Size)
-		{
-			return false;
-		}
-
-		return File.Hash.IsEmpty() || LexToString(FMD5Hash::HashFile(*FilePath)).Equals(File.Hash, ESearchCase::IgnoreCase);
 	}
 
 	bool SaveResponseContentToFile(const FUnHttpResponse& Response, const FString& SavePath)
@@ -173,14 +146,14 @@ void UVersionUpdateSubsystem::QueueResumableDownload(const FRemotePatchFile& Fil
 		// Custom/DLL/DLC 等非 Pak 文件走 Custom 临时目录，并记录最终安装路径。
 		SavePath = GetDownloadPathToCustom() / FileName;
 
-		const FString FinalPath = GetCustomInstallPath(File, FileName);
+		const FString FinalPath = PatchManifest::GetInstallAbsolutePath(File, FPaths::ProjectDir());
 		EnsureDirectory(FPaths::GetPath(FinalPath));
 		RelativePatchs.AddUnique(FinalPath);
 	}
 
 	EnsureDirectory(FPaths::GetPath(SavePath));
 
-	if (IsFileMatched(SavePath, File))
+	if (PatchManifest::IsLocalFileMatched(SavePath, File))
 	{
 		// 上次已经完整下载并通过校验，本轮直接复用。
 		// 广播单文件完成，让业务层的计数/UI进行处理
@@ -210,7 +183,7 @@ void UVersionUpdateSubsystem::QueueResumableDownload(const FRemotePatchFile& Fil
 		}
 	}
 
-	if (File.Size > 0 && FileState.ExistingBytes == File.Size && IsFileMatched(FileState.PartPath, File))
+	if (File.Size > 0 && FileState.ExistingBytes == File.Size && PatchManifest::IsLocalFileMatched(FileState.PartPath, File))
 	{
 		IFileManager::Get().Move(*SavePath, *FileState.PartPath, true, true);
 		OnPatchFileDownloadCompleted.Broadcast(FileName, true);

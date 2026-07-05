@@ -30,18 +30,10 @@ void UVersionUpdateSubsystem::LoadOrCreateClientManifest()
 bool UVersionUpdateSubsystem::SaveClientManifest()
 {
 	// 保存前同步权威版本号。安装完成后调用时，可记录当前已安装到的版本。
-	FString Json;
 	const FString FilePath = GetClientManifestPath();
-	if (!VersionClientJson::Save(ClientManifest, Json))
+	if (!VersionClientJson::SaveToFile(ClientManifest, FilePath))
 	{
-		// 序列化失败通常说明结构数据异常。
-		UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to serialize client manifest: %s"), *FilePath);
-		return false;
-	}
-
-	if (!FFileHelper::SaveStringToFile(Json, *FilePath))
-	{
-		// 写入失败通常是路径、权限或文件占用问题。
+		// 序列化或写入失败通常是结构数据异常、路径、权限或文件占用问题。
 		UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to save client manifest: %s"), *FilePath);
 		return false;
 	}

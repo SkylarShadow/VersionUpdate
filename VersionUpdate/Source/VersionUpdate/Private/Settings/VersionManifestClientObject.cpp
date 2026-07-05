@@ -1,6 +1,4 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "Settings/VersionManifestClientObject.h"
 
 #include "Json.h"
@@ -31,6 +29,18 @@ namespace VersionClientJson
 		Writer->Close();
 
 		return true;
+	}
+
+	bool SaveToFile(const FClientVersionFilesList& Info, const FString& FilePath)
+	{
+		FString Json;
+		if (!Save(Info, Json))
+		{
+			return false;
+		}
+
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
+		return FFileHelper::SaveStringToFile(Json, *FilePath);
 	}
 
 	bool Read(const FString& Json, FClientVersionFilesList& OutInfo)

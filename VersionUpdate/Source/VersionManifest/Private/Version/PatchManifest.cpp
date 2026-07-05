@@ -1,9 +1,70 @@
 ﻿
 #include "Version/PatchManifest.h"
 
+#include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 
 namespace PatchManifest
 {
+	FString GetInstallRelativePath(const FRemotePatchFile& File)
+	{
+		FString InstallDir = File.InstallDir;
+		FPaths::NormalizeFilename(InstallDir);
+		InstallDir.RemoveFromStart(TEXT("/"));
+		InstallDir.RemoveFromEnd(TEXT("/"));
+		return InstallDir.IsEmpty() ? File.Name : InstallDir / File.Name;
+	}
+
+	FString GetInstallAbsolutePath(const FRemotePatchFile& File, const FString& RootPath)
+	{
+		return FPaths::ConvertRelativePathToFull(RootPath / GetInstallRelativePath(File));
+	}
+
+	bool IsLocalFileMatched(const FString& FilePath, const FRemotePatchFile& File)
+	{
+		if (!FPaths::FileExists(FilePath))
+		{
+			return false;
+		}
+
+		if (File.Size > 0 && IFileManager::Get().FileSize(*FilePath) != File.Size)
+		{
+			return false;
+		}
+
+		return File.Hash.IsEmpty() || LexToString(FMD5Hash::HashFile(*FilePath)).Equals(File.Hash, ESearchCase::IgnoreCase);
+	}
+
+	int32 ParseVersionComponent(FString Component)
+	{
+		Component.TrimStartAndEndInline();
+
+		int32 Value = 0;
+		LexTryParseString(Value, *Component);
+		return Value;
+	}
+
+	int32 CompareVersion(const FString& LeftVersion, const FString& RightVersion)
+	{
+		TArray<FString> LeftParts;
+		TArray<FString> RightParts;
+		LeftVersion.ParseIntoArray(LeftParts, TEXT("."), true);
+		RightVersion.ParseIntoArray(RightParts, TEXT("."), true);
+
+		const int32 ComparePartCount = FMath::Max(LeftParts.Num(), RightParts.Num());
+		for (int32 Index = 0; Index < ComparePartCount; ++Index)
+		{
+			const int32 LeftValue = LeftParts.IsValidIndex(Index) ? ParseVersionComponent(LeftParts[Index]) : 0;
+			const int32 RightValue = RightParts.IsValidIndex(Index) ? ParseVersionComponent(RightParts[Index]) : 0;
+			if (LeftValue != RightValue)
+			{
+				return LeftValue > RightValue ? 1 : -1;
+			}
+		}
+
+		return 0;
+	}
+
 	EPatchFileTag ParseTag(const FString& TagStr)
 	{
 		UEnum* Enum = StaticEnum<EPatchFileTag>();

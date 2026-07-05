@@ -1,5 +1,4 @@
-﻿
-#include "Widget/SVersionUpdateSlateMain.h"
+﻿#include "Widget/SVersionUpdateSlateMain.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Input/SButton.h"
 #include "PropertyEditorModule.h"

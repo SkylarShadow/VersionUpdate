@@ -2,7 +2,6 @@
 
 #include "GameMapsSettings.h"
 #include "Kismet/GameplayStatics.h"
-#include "Misc/FileHelper.h"
 #include "VersionInstallationManage.h"
 #include "VersionUpdateLogChannels.h"
 
@@ -28,23 +27,6 @@ namespace
 		return PlatformName.Contains(TEXT("Windows")) ? TEXT("Win64") : PlatformName;
 	}
 
-	// 生成文件安装后的相对路径 key
-	// InstalledPatchFiles 去重、丢弃文件匹配、外部安装器删除路径都必须使用同一套规则
-	FString GetInstallRelativeFilePath(const FRemotePatchFile& File)
-	{
-		FString InstallDir = File.InstallDir;
-		FPaths::NormalizeFilename(InstallDir);
-		InstallDir.RemoveFromStart(TEXT("/"));
-		InstallDir.RemoveFromEnd(TEXT("/"));
-		return InstallDir.IsEmpty() ? File.Name : InstallDir / File.Name;
-	}
-
-	// 将 Manifest 里的安装相对路径转换成当前项目下的绝对路径
-	FString GetInstallAbsoluteFilePath(const FRemotePatchFile& File)
-	{
-		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / GetInstallRelativeFilePath(File));
-	}
-
 	// 临时 ClientManifest 路径。
 	// 无感更新和独立安装器都会先写这个文件，安装成功后再提交到正式 ClientVersion.config。
 	FString GetTempClientManifestPath()
@@ -52,33 +34,10 @@ namespace
 		return FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TempClientVersionJsonRelativePath);
 	}
 
-	// 将指定 ClientManifest 保存到指定路径。
-	// 用于写临时清单；正式清单仍由 UVersionUpdateSubsystem::SaveClientManifest 负责。
-	bool SaveClientManifestToFile(const FClientVersionFilesList& Manifest, const FString& FilePath)
-	{
-		FString Json;
-		if (!VersionClientJson::Save(Manifest, Json))
-		{
-			// 序列化失败一般意味着 Manifest 数据结构异常，不能继续安装。
-			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to serialize client manifest: %s"), *FilePath);
-			return false;
-		}
-
-		// 先确保目录存在，避免首次安装时 Content/Version 目录不存在导致写入失败。
-		IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
-		if (!FFileHelper::SaveStringToFile(Json, *FilePath))
-		{
-			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to save client manifest: %s"), *FilePath);
-			return false;
-		}
-
-		return true;
-	}
-
 	// 保存安装成功后应该提交的临时 ClientManifest。
 	bool SaveTempClientManifest(const FClientVersionFilesList& Manifest)
 	{
-		return SaveClientManifestToFile(Manifest, GetTempClientManifestPath());
+		return VersionClientJson::SaveToFile(Manifest, GetTempClientManifestPath());
 	}
 
 	// 安装成功并写入正式 ClientManifest 后，清理临时清单。
@@ -236,25 +195,11 @@ bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 	return true;
 }
 
-// 获取安装成功后的目标版本号。
-// TODO: 暂时约定使用最后一个 PatchVersion.Version，最好改为判断服务器最新版本
-FString UVersionUpdateSubsystem::GetInstalledTargetVersion() const
-{
-	for (int32 Index = ServerManifest.Patches.Num() - 1; Index >= 0; --Index)
-	{
-		if (!ServerManifest.Patches[Index].Version.IsEmpty())
-		{
-			return ServerManifest.Patches[Index].Version;
-		}
-	}
-
-	return CurrentVersion;
-}
-
 // 根据服务端 Manifest、本地已安装记录、本轮下载列表和废弃列表，生成安装成功后的 ClientManifest。
 void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 {
-	ClientManifest.CurrentVersion = GetInstalledTargetVersion();
+	// 安装阶段统一使用版本检测模块计算出的服务端目标版本，避免大版本安装和普通热更写入不同规则的版本号。
+	ClientManifest.CurrentVersion = GetLatestServerVersion();
 
 	// 先把旧 InstalledPatchFiles 转成 Map，后续按安装相对路径覆盖，避免重复线性扫描。
 	TMap<FString, FRemotePatchFile> InstalledFilesByPath;
@@ -262,7 +207,7 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 	{
 		if (!InstalledFile.Name.IsEmpty())
 		{
-			InstalledFilesByPath.Add(GetInstallRelativeFilePath(InstalledFile), InstalledFile);
+			InstalledFilesByPath.Add(PatchManifest::GetInstallRelativePath(InstalledFile), InstalledFile);
 		}
 	}
 
@@ -275,7 +220,7 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 		}
 
 		// 废弃记录只影响 ClientManifest 状态，实际文件删除由安装管理器或独立安装器完成。
-		const FString FileKey = GetInstallRelativeFilePath(File);
+		const FString FileKey = PatchManifest::GetInstallRelativePath(File);
 		DiscardKeys.Add(FileKey);
 		InstalledFilesByPath.Remove(FileKey);
 	};
@@ -300,7 +245,7 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 
 	auto AddInstalled = [&DiscardKeys, &InstalledFilesByPath](const FRemotePatchFile& InstalledFile)
 	{
-		const FString InstalledKey = GetInstallRelativeFilePath(InstalledFile);
+		const FString InstalledKey = PatchManifest::GetInstallRelativePath(InstalledFile);
 		if (InstalledFile.Name.IsEmpty() || InstalledFile.bDiscard || DiscardKeys.Contains(InstalledKey))
 		{
 			return;
@@ -329,7 +274,7 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 	InstalledFilesByPath.GenerateValueArray(ClientManifest.InstalledPatchFiles);
 	ClientManifest.InstalledPatchFiles.Sort([](const FRemotePatchFile& Left, const FRemotePatchFile& Right)
 	{
-		return GetInstallRelativeFilePath(Left) < GetInstallRelativeFilePath(Right);
+		return PatchManifest::GetInstallRelativePath(Left) < PatchManifest::GetInstallRelativePath(Right);
 	});
 }
 
@@ -342,7 +287,7 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 	{
 		if (!File.Name.IsEmpty())
 		{
-			DiscardsPathsStr += GetInstallAbsoluteFilePath(File) + TEXT("|");
+			DiscardsPathsStr += PatchManifest::GetInstallAbsolutePath(File, FPaths::ProjectDir()) + TEXT("|");
 		}
 	}
 

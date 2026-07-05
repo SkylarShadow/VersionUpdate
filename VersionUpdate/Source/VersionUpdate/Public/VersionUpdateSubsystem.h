@@ -103,7 +103,7 @@ struct FVersionUpdateDownloadFileState
  * 4. DownloadPendingFiles 下载检测阶段生成的文件队列，并在完成后广播 OnVersionDownloadCompleted。
  * 5. InstallDownloadedFiles 安装已下载文件，并广播 OnVersionInstallCompleted。
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType,Blueprintable)
 class VERSIONUPDATE_API UVersionUpdateSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
@@ -209,8 +209,14 @@ private:
 	// 普通热更新文件差异比较，生成下载和废弃队列。
 	EServerVersionResponseType ComparePatchFiles();
 
-	// 大版本更新准备，只使用服务器 MajorVersionFiles。
+	// 收集服务器 Patches 与本地文件的差异。普通热更和大版本补丁补齐共用这套判断。
+	void CollectPatchFileDifferences();
+
+	// 大版本更新准备：先下载 MajorVersionFiles，再补齐基于该大版本的 Patches。
 	EServerVersionResponseType PrepareMajorVersionUpdate();
+
+	// 从服务器 Manifest 中取语义版本号最大的版本，安装写入 ClientManifest 时也使用同一结果。
+	FString GetLatestServerVersion() const;
 
 	// 下载临时目录。
 	FString GetDownloadPathToPak() const;
@@ -231,7 +237,6 @@ private:
 	bool LaunchExternalInstaller();
 	bool UnmountMountedPaks();
 	bool RemountCachedPaks();
-	FString GetInstalledTargetVersion() const;
 	void UpdateClientManifestAfterInstall();
 
 	// 初始化本地 ClientManifest，不存在时创建。
