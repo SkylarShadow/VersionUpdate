@@ -4,4 +4,4 @@
 
 #include "CoreMinimal.h"
 
-int32 RunVersionInstallationProgress(const TCHAR* CommandLine);
+int32 RunVersionInstallationProcessor(const TCHAR* CommandLine);

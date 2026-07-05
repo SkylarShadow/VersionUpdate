@@ -4,13 +4,13 @@ using UnrealBuildTool;
 using System.Collections.Generic;
 
 [SupportedPlatforms(UnrealPlatformClass.Desktop)]
-public class VersionInstallationProgressTarget : TargetRules
+public class VersionInstallationProcessorTarget : TargetRules
 {
-	public VersionInstallationProgressTarget(TargetInfo Target) : base(Target)
+	public VersionInstallationProcessorTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Program;
 		LinkType = TargetLinkType.Monolithic;
-		LaunchModuleName = "VersionInstallationProgress";
+		LaunchModuleName = "VersionInstallationProcessor";
 		//ExtraModuleNames.Add("EditorStyle");
 
 		// Lean and mean

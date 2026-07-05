@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Styling/SlateStyle.h"
 
-class FVersionInstallationProgressStyle
+class FVersionInstallationProcessorStyle
 {
 public:
 	static void Initialize();

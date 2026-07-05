@@ -1,26 +1,26 @@
 ﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "VersionInstallationProgress.h"
+#include "VersionInstallationProcessor.h"
 #include "RequiredProgramMainCPPInclude.h"
 #include "StandaloneRenderer.h"
 #include "Core/Widget/SMainScreen.h"
 #include "ThreadManage.h"
-#include "VersionInstallationProgressType.h"
+#include "VersionInstallationProcessorType.h"
 #include "Core/Installation/VersionInstallation.h"
-#include "Core/Log/VersionInstallationProgressLog.h"
-#include "Core/Style/VersionInstallationProgressStyle.h"
+#include "Core/Log/VersionInstallationProcessorLog.h"
+#include "Core/Style/VersionInstallationProcessorStyle.h"
 
-IMPLEMENT_APPLICATION(VersionInstallationProgress, "VersionInstallationProgress");
+IMPLEMENT_APPLICATION(VersionInstallationProcessor, "VersionInstallationProcessor");
 
-#define LOCTEXT_NAMESPACE "VersionInstallationProgress"
+#define LOCTEXT_NAMESPACE "VersionInstallationProcessor"
 
-int32 RunVersionInstallationProgress(const TCHAR* CommandLine)
+int32 RunVersionInstallationProcessor(const TCHAR* CommandLine)
 {
 	//I.引擎初始化
 	GEngineLoop.PreInit(CommandLine);
 
 	//II.命令初始化
-	VersionInstallation::InitCommandInstallationProgress();
+	VersionInstallation::InitCommandInstallationProcessor();
 
 	//III.UObject对象初始化
 	ProcessNewlyLoadedUObjects();
@@ -33,11 +33,11 @@ int32 RunVersionInstallationProgress(const TCHAR* CommandLine)
 	FSlateApplication::InitHighDPI(true);
 
 	//V.初始化我们的资源
-	FVersionInstallationProgressStyle::Initialize();
-	FVersionInstallationProgressStyle::ReloadTextures();
+	FVersionInstallationProcessorStyle::Initialize();
+	FVersionInstallationProcessorStyle::ReloadTextures();
 
 	//VI.生成自定义的画面
-	VersionInstallation::SpawnInstallationProgressUI();
+	VersionInstallation::SpawnInstallationProcessorUI();
 
 	//VII.异步运行资源的拷贝
 	GThread::Get()->GetProxy().CreateLambda([&]()
@@ -63,7 +63,7 @@ int32 RunVersionInstallationProgress(const TCHAR* CommandLine)
 	}
 
 	//VIII.结束引擎
-	FVersionInstallationProgressStyle::Shutdown();
+	FVersionInstallationProcessorStyle::Shutdown();
 	FCoreDelegates::OnExit.Broadcast();
 	FSlateApplication::Shutdown();
 	FModuleManager::Get().UnloadModulesAtShutdown();

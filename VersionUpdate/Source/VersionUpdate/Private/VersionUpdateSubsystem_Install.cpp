@@ -2,29 +2,36 @@
 
 #include "GameMapsSettings.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/FileHelper.h"
 #include "VersionInstallationManage.h"
-#include "VersionPakBPLibrary.h"
 #include "VersionUpdateLogChannels.h"
+
+#if VERSIONUPDATE_USE_HOTPATCHER_PAK
+#include "FlibPakHelper.h"
+#else
+#include "VersionPakBPLibrary.h"
+#endif
 
 namespace
 {
-	// 安装进度由安装管理器拷贝文件时回调 Poll 累加。
+	// 安装阶段的全局进度状态。安装管理器通过 FCopyProgress::Poll 回调累加整体进度
 	float PakNumber = 0.f;
 	float CustomPakNumber = 0.f;
 	float LastFraction = 0.f;
 	float PercentageInterval = 0.f;
 	float VersionUpdateInstallationProgressValue = 0.f;
 
-	// 外部安装器和项目启动程序目录使用平台名；Windows 下固定为 Win64。
+	// 获取外部安装器和项目 exe 所在的平台目录名
 	FString GetPlatformName()
 	{
 		const FString PlatformName = FPlatformProperties::PlatformName();
 		return PlatformName.Contains(TEXT("Windows")) ? TEXT("Win64") : PlatformName;
 	}
-	
+
+	// 生成文件安装后的相对路径 key
+	// InstalledPatchFiles 去重、丢弃文件匹配、外部安装器删除路径都必须使用同一套规则
 	FString GetInstallRelativeFilePath(const FRemotePatchFile& File)
 	{
-		// InstalledPatchFiles 需要按最终安装位置去重，不能只比较 Name。
 		FString InstallDir = File.InstallDir;
 		FPaths::NormalizeFilename(InstallDir);
 		InstallDir.RemoveFromStart(TEXT("/"));
@@ -32,19 +39,87 @@ namespace
 		return InstallDir.IsEmpty() ? File.Name : InstallDir / File.Name;
 	}
 
-	// 丢弃文件需要转换成本地绝对路径传给安装器。
+	// 将 Manifest 里的安装相对路径转换成当前项目下的绝对路径
 	FString GetInstallAbsoluteFilePath(const FRemotePatchFile& File)
 	{
 		return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / GetInstallRelativeFilePath(File));
 	}
 
+	// 临时 ClientManifest 路径。
+	// 无感更新和独立安装器都会先写这个文件，安装成功后再提交到正式 ClientVersion.config。
+	FString GetTempClientManifestPath()
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TempClientVersionJsonRelativePath);
+	}
 
+	// 将指定 ClientManifest 保存到指定路径。
+	// 用于写临时清单；正式清单仍由 UVersionUpdateSubsystem::SaveClientManifest 负责。
+	bool SaveClientManifestToFile(const FClientVersionFilesList& Manifest, const FString& FilePath)
+	{
+		FString Json;
+		if (!VersionClientJson::Save(Manifest, Json))
+		{
+			// 序列化失败一般意味着 Manifest 数据结构异常，不能继续安装。
+			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to serialize client manifest: %s"), *FilePath);
+			return false;
+		}
 
-	// IFileManager::Copy 的进度回调。这里按文件数量平均累加整体安装进度。
+		// 先确保目录存在，避免首次安装时 Content/Version 目录不存在导致写入失败。
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
+		if (!FFileHelper::SaveStringToFile(Json, *FilePath))
+		{
+			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Failed to save client manifest: %s"), *FilePath);
+			return false;
+		}
+
+		return true;
+	}
+
+	// 保存安装成功后应该提交的临时 ClientManifest。
+	bool SaveTempClientManifest(const FClientVersionFilesList& Manifest)
+	{
+		return SaveClientManifestToFile(Manifest, GetTempClientManifestPath());
+	}
+
+	// 安装成功并写入正式 ClientManifest 后，清理临时清单。
+	void DeleteTempClientManifest()
+	{
+		IFileManager::Get().Delete(*GetTempClientManifestPath());
+	}
+	
+	void GetMountedPakFilenames(TArray<FString>& OutPakFilenames)
+	{
+#if VERSIONUPDATE_USE_HOTPATCHER_PAK
+		OutPakFilenames = UFlibPakHelper::GetAllMountedPaks();
+#else
+		UVersionPakBPLibrary::GetMountedPakFilenames(OutPakFilenames);
+#endif
+	}
+
+	bool UnmountPakFile(const FString& PakFile)
+	{
+#if VERSIONUPDATE_USE_HOTPATCHER_PAK
+		return UFlibPakHelper::UnMountPak(PakFile);
+#else
+		return UVersionPakBPLibrary::UnmountPak(PakFile);
+#endif
+	}
+
+	bool MountPakFile(const FString& PakFile)
+	{
+#if VERSIONUPDATE_USE_HOTPATCHER_PAK
+		return UFlibPakHelper::MountPak(PakFile, 0, TEXT(""));
+#else
+		return UVersionPakBPLibrary::MountPak(PakFile, 0, TEXT(""));
+#endif
+	}
+
+	// 文件复制进度回调。每个文件按同等权重累加到总安装进度。
 	struct FPakInstallationProgress : public FCopyProgress
 	{
 		virtual ~FPakInstallationProgress() {}
 
+		// Fraction 是当前正在复制的单个文件进度，函数内转换成整体安装进度。
 		virtual bool Poll(float Fraction) override
 		{
 			PercentageInterval = Fraction - LastFraction;
@@ -55,22 +130,22 @@ namespace
 				VersionUpdateInstallationProgressValue += PercentageInterval / Total;
 			}
 
+			// 单文件完成后重置 LastFraction
 			LastFraction = (Fraction == 1.f) ? 0.f : Fraction;
 			return true;
 		}
 	};
 }
 
+// 获取安装阶段进度。下载进度请使用 OnVersionDownloadProgress。
 float UVersionUpdateSubsystem::GetInstallationProgress() const
 {
-	// 返回安装阶段进度。下载进度请使用 OnVersionDownloadProgress。
 	return VersionUpdateInstallationProgressValue;
 }
 
-// 每次版本检测或安装前重置，避免上一次安装进度残留。
+// 重置安装进度状态，避免上一次安装残留影响本轮 UI。
 void UVersionUpdateSubsystem::ResetInstallationProgress()
 {
-
 	PakNumber = 0.f;
 	CustomPakNumber = 0.f;
 	LastFraction = 0.f;
@@ -78,7 +153,7 @@ void UVersionUpdateSubsystem::ResetInstallationProgress()
 	VersionUpdateInstallationProgressValue = 0.f;
 }
 
-// 安装下载文件，业务层可以在下载完后调用此函数进行安装
+// 安装当前 PendingDownloadFiles。根据具体情况决定走无感安装，还是启动独立安装器。
 bool UVersionUpdateSubsystem::InstallDownloadedFiles()
 {
 	const bool bSucceeded = bSeamlessHotUpdate ? ExecuteSeamlessInstall() : LaunchExternalInstaller();
@@ -86,61 +161,83 @@ bool UVersionUpdateSubsystem::InstallDownloadedFiles()
 	return bSucceeded;
 }
 
+// 无感安装
 bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 {
 	ResetInstallationProgress();
 
-	// 无感安装会在当前进程内覆盖资源，因此先卸载已挂载 Pak，避免文件占用。
-	if (!UnmountMountedPaks())
+	// 先生成“安装成功后应该保存”的客户端清单，但暂不提交到正式 ClientVersion.config。
+	// 如果后续任一步失败，会恢复 OriginalClientManifest，避免内存状态误变成新版本。
+	const FClientVersionFilesList OriginalClientManifest = ClientManifest;
+	UpdateClientManifestAfterInstall();
+	const FClientVersionFilesList InstalledClientManifest = ClientManifest;
+	if (!SaveTempClientManifest(InstalledClientManifest))
 	{
+		ClientManifest = OriginalClientManifest;
 		return false;
 	}
 
-	// 临时下载目录和最终安装目录。
+	// 当前进程内覆盖 Pak 前需要卸载已挂载 Pak，避免文件占用导致复制失败。
+	if (!UnmountMountedPaks())
+	{
+		ClientManifest = OriginalClientManifest;
+		return false;
+	}
+
 	const FString ResourcesToCopiedCustom = GetDownloadPathToCustom();
 	const FString ResourcesToCopied = GetDownloadPathToPak();
 	const FString ProjectToContentPaks = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("Paks"));
 	const FString ProjectRootPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 
-	// 执行复制、删除临时文件、处理废弃文件等安装动作。
+	// 安装管理器负责复制、复制后校验、删除临时下载文件和删除废弃文件。
+	// 校验依据使用临时 ClientManifest 中的最终 InstalledPatchFiles，保证无感和独立安装器使用同一份清单。
 	const bool bInstallOK = FVersionInstallationManage().HandleHotInstallation<FPakInstallationProgress>(
 		ResourcesToCopied,
 		ResourcesToCopiedCustom,
 		ProjectToContentPaks,
 		ProjectRootPath,
 		RelativePatchs,
-		PendingDownloadFiles,
+		InstalledClientManifest.InstalledPatchFiles,
 		PendingDiscardFiles,
 		PakNumber,
 		CustomPakNumber,
 		VersionUpdateInstallationProgressValue);
 
-	if (!bInstallOK || !RemountCachedPaks())
+	if (!bInstallOK)
 	{
-		// 安装失败或重新挂载失败，都视为无感安装失败。
+		// 安装失败时尽量恢复之前卸载的 Pak，并恢复内存里的旧 ClientManifest。
+		RemountCachedPaks();
+		ClientManifest = OriginalClientManifest;
 		return false;
 	}
 
-	// 安装成功后持久化客户端状态。
-	// 先更新内存中的安装结果，再写 json；写入失败时仍按安装失败处理，避免本地状态失真。
-	UpdateClientManifestAfterInstall();
+	// 文件已安装成功，但重新挂载失败也会导致当前进程状态不可靠。
+	if (!RemountCachedPaks())
+	{
+		return false;
+	}
+
+	// 只有安装和校验都成功后，才提交正式 ClientManifest。
+	ClientManifest = InstalledClientManifest;
 	if (!SaveClientManifest())
 	{
 		return false;
 	}
 
+	DeleteTempClientManifest();
+
+	// 无感安装完成后重进启动地图，让已更新资源在当前进程里重新加载。
 	const FString StartupMap = GetDefault<UGameMapsSettings>()->GetGameDefaultMap();
 	if (!StartupMap.IsEmpty())
 	{
-		// 无感安装完成后重进启动地图，让新资源状态更稳定地生效。
 		UGameplayStatics::OpenLevel(GetWorld(), *StartupMap);
 	}
 
 	return true;
 }
 
-// 当前 Manifest 没有独立的目标客户端版本字段。
-// 热更新路径下，这里约定使用最后一个补丁版本作为安装完成后的本地版本号。
+// 获取安装成功后的目标版本号。
+// TODO: 暂时约定使用最后一个 PatchVersion.Version，最好改为判断服务器最新版本
 FString UVersionUpdateSubsystem::GetInstalledTargetVersion() const
 {
 	for (int32 Index = ServerManifest.Patches.Num() - 1; Index >= 0; --Index)
@@ -154,11 +251,12 @@ FString UVersionUpdateSubsystem::GetInstalledTargetVersion() const
 	return CurrentVersion;
 }
 
+// 根据服务端 Manifest、本地已安装记录、本轮下载列表和废弃列表，生成安装成功后的 ClientManifest。
 void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 {
-	// 本地 json 记录的是“已经安装到磁盘上的版本”，不是当前进程启动时的旧版本。
 	ClientManifest.CurrentVersion = GetInstalledTargetVersion();
 
+	// 先把旧 InstalledPatchFiles 转成 Map，后续按安装相对路径覆盖，避免重复线性扫描。
 	TMap<FString, FRemotePatchFile> InstalledFilesByPath;
 	for (const FRemotePatchFile& InstalledFile : ClientManifest.InstalledPatchFiles)
 	{
@@ -176,18 +274,19 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 			return;
 		}
 
+		// 废弃记录只影响 ClientManifest 状态，实际文件删除由安装管理器或独立安装器完成。
 		const FString FileKey = GetInstallRelativeFilePath(File);
 		DiscardKeys.Add(FileKey);
 		InstalledFilesByPath.Remove(FileKey);
 	};
 
-	// 先收集所有应从 InstalledPatchFiles 中删除的目标路径。
-	// 这里只记录路径 key，不直接删除文件；物理删除由安装器完成。
+	// PendingDiscardFiles 是本轮比较阶段明确算出的废弃文件。
 	for (const FRemotePatchFile& DiscardFile : PendingDiscardFiles)
 	{
 		MarkDiscarded(DiscardFile);
 	}
 
+	// 服务端补丁里也可能直接标记 bDiscard，需要一起移出 InstalledPatchFiles。
 	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
 	{
 		for (const FRemotePatchFile& ServerFile : PatchVersion.Files)
@@ -202,17 +301,16 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 	auto AddInstalled = [&DiscardKeys, &InstalledFilesByPath](const FRemotePatchFile& InstalledFile)
 	{
 		const FString InstalledKey = GetInstallRelativeFilePath(InstalledFile);
-		// 同一路径只保留一条记录；如果该路径被标记为丢弃，则不再写回 InstalledPatchFiles。
 		if (InstalledFile.Name.IsEmpty() || InstalledFile.bDiscard || DiscardKeys.Contains(InstalledKey))
 		{
 			return;
 		}
 
+		// 同一路径后写入者覆盖先写入者，保证 Hash / Size 等元数据取最新状态。
 		InstalledFilesByPath.Add(InstalledKey, InstalledFile);
 	};
 
-	// 先移除所有废弃项，再重建应保留的文件列表，避免旧版本记录残留。
-	// 服务端补丁列表描述热更新后应存在的完整文件集合，先按它重建基础状态。
+	// 先按服务端补丁列表重建安装后应存在的基础文件集合。
 	for (const FPatchVersion& PatchVersion : ServerManifest.Patches)
 	{
 		for (const FRemotePatchFile& ServerFile : PatchVersion.Files)
@@ -221,7 +319,7 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 		}
 	}
 
-	// 再用本轮实际下载的文件覆盖一次，确保 Hash / Size 等元数据与本次安装目标一致。
+	// 再用本轮实际下载文件覆盖一次，确保临时清单中的元数据与本轮安装目标一致。
 	for (const FRemotePatchFile& InstalledFile : PendingDownloadFiles)
 	{
 		AddInstalled(InstalledFile);
@@ -235,9 +333,10 @@ void UVersionUpdateSubsystem::UpdateClientManifestAfterInstall()
 	});
 }
 
+// 启动独立安装器
 bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 {
-	// 外部安装器需要知道哪些本地文件应被删除。
+	// 独立安装器不持有 PendingDiscardFiles，把要删除的本地绝对路径拼到命令行里
 	FString DiscardsPathsStr;
 	for (const FRemotePatchFile& File : PendingDiscardFiles)
 	{
@@ -250,13 +349,12 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 	DiscardsPathsStr.RemoveFromEnd(TEXT("|"));
 	if (DiscardsPathsStr.IsEmpty())
 	{
-		// 安装器使用 NONE 表示没有废弃文件，避免空参数歧义。
+		// 避免传空字符串导致安装器解析参数时产生歧义。
 		DiscardsPathsStr = TEXT("NONE");
 	}
 
-	// 安装器随引擎二进制放置，平台目录按 UE 规则解析。
 	const FString ExePath = FPaths::ConvertRelativePathToFull(
-		FPaths::EngineDir() / TEXT("Binaries") / GetPlatformName() / TEXT("VersionInstallationProgress.exe"));
+		FPaths::EngineDir() / TEXT("Binaries") / GetPlatformName() / TEXT("VersionInstallationProcessor.exe"));
 
 	if (!FPaths::FileExists(ExePath))
 	{
@@ -264,8 +362,17 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 		return false;
 	}
 
+	// 和无感更新一样，先写临时 ClientManifest；独立安装器安装成功后会提交到正式 ClientVersion.config。
+	const FClientVersionFilesList OriginalClientManifest = ClientManifest;
+	UpdateClientManifestAfterInstall();
+	const FClientVersionFilesList InstalledClientManifest = ClientManifest;
+	if (!SaveTempClientManifest(InstalledClientManifest))
+	{
+		ClientManifest = OriginalClientManifest;
+		return false;
+	}
+
 	FString Param;
-	// 参数格式必须和 VersionInstallationProgress.exe 的命令行解析保持一致。
 	Param += TEXT("-ResourcesToCopiedCustom=") + GetDownloadPathToCustom();
 	Param += TEXT(" -ResourcesToCopied=") + GetDownloadPathToPak();
 	Param += TEXT(" -ProjectToContentPaks=") + FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("Paks"));
@@ -277,7 +384,7 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 
 	if (RelativePatchs.Num() > 0)
 	{
-		// 非 Pak 文件的“临时文件 -> 最终路径”映射，用 + 拼接传给安装器。
+		// 非 Pak 文件需要传入最终安装路径，安装器会在临时自定义下载目录中按文件名匹配。
 		FString RelativePatchParam;
 		for (const FString& Path : RelativePatchs)
 		{
@@ -290,24 +397,28 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 	const FProcHandle Handle = FPlatformProcess::CreateProc(*ExePath, *Param, false, false, false, nullptr, 0, nullptr, nullptr);
 	if (Handle.IsValid())
 	{
-		// 外部安装器接管后退出当前进程，避免文件占用。
+		// 外部安装器接管后退出当前进程，避免当前进程占用待覆盖文件。
 		FPlatformMisc::RequestExit(true);
+	}
+	else
+	{
+		// 安装器未启动时恢复内存状态；临时文件保留不会影响正式版本，但后续可考虑删除。
+		ClientManifest = OriginalClientManifest;
 	}
 
 	return Handle.IsValid();
 }
 
+// 卸载当前挂载的 Pak，并缓存列表供安装后恢复。
 bool UVersionUpdateSubsystem::UnmountMountedPaks()
 {
-	// 缓存当前挂载列表，安装完成后 RemountCachedPaks 会尝试恢复。
 	MountedPakCache.Empty();
-	UVersionPakBPLibrary::GetMountedPakFilenames(MountedPakCache);
+	GetMountedPakFilenames(MountedPakCache);
 
 	for (const FString& PakFile : MountedPakCache)
 	{
-		if (!UVersionPakBPLibrary::UnmountPak(PakFile))
+		if (!UnmountPakFile(PakFile))
 		{
-			// 任意 Pak 卸载失败都中断无感安装。
 			return false;
 		}
 	}
@@ -315,12 +426,12 @@ bool UVersionUpdateSubsystem::UnmountMountedPaks()
 	return true;
 }
 
+// 重新挂载无感安装前缓存的 Pak。
 bool UVersionUpdateSubsystem::RemountCachedPaks()
 {
-	// 重新挂载卸载前缓存的 Pak。当前实现保持旧行为：挂载失败只记录在底层，不中断返回。
 	for (const FString& PakFile : MountedPakCache)
 	{
-		UVersionPakBPLibrary::MountPak(PakFile, 0, TEXT(""));
+		MountPakFile(PakFile);
 	}
 
 	return true;

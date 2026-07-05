@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class VersionInstallationProgress : ModuleRules
+public class VersionInstallationProcessor : ModuleRules
 {
-	public VersionInstallationProgress(ReadOnlyTargetRules Target) : base(Target)
+	public VersionInstallationProcessor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PublicIncludePaths.Add("Runtime/Launch/Public");
 
@@ -16,7 +16,9 @@ public class VersionInstallationProgress : ModuleRules
 		PrivateDependencyModuleNames.Add("Slate");
 		PrivateDependencyModuleNames.Add("SlateCore");
 		PrivateDependencyModuleNames.Add("StandaloneRenderer");
+		PrivateDependencyModuleNames.Add("Json");
 		PrivateDependencyModuleNames.Add("UnThread");
 		PrivateDependencyModuleNames.Add("VersionManifest");
+		PrivateDependencyModuleNames.Add("VersionInstallation");
 	}
 }

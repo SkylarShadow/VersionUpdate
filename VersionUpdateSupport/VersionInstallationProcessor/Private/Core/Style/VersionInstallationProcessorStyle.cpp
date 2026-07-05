@@ -1,11 +1,11 @@
 ﻿
-#include "VersionInstallationProgressStyle.h"
+#include "VersionInstallationProcessorStyle.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/SlateStyleRegistry.h"
 
-TSharedPtr< FSlateStyleSet > FVersionInstallationProgressStyle::StyleInstance = NULL;
+TSharedPtr< FSlateStyleSet > FVersionInstallationProcessorStyle::StyleInstance = NULL;
 
-void FVersionInstallationProgressStyle::Initialize()
+void FVersionInstallationProcessorStyle::Initialize()
 {
 	if (!StyleInstance.IsValid())
 	{
@@ -14,14 +14,14 @@ void FVersionInstallationProgressStyle::Initialize()
 	}
 }
 
-void FVersionInstallationProgressStyle::Shutdown()
+void FVersionInstallationProcessorStyle::Shutdown()
 {
 	FSlateStyleRegistry::UnRegisterSlateStyle(*StyleInstance);
 	ensure(StyleInstance.IsUnique());
 	StyleInstance.Reset();
 }
 
-void FVersionInstallationProgressStyle::ReloadTextures()
+void FVersionInstallationProcessorStyle::ReloadTextures()
 {
 	if (FSlateApplication::IsInitialized())
 	{
@@ -29,12 +29,12 @@ void FVersionInstallationProgressStyle::ReloadTextures()
 	}
 }
 
-const ISlateStyle& FVersionInstallationProgressStyle::Get()
+const ISlateStyle& FVersionInstallationProcessorStyle::Get()
 {
 	return *StyleInstance;
 }
 
-FName FVersionInstallationProgressStyle::GetStyleSetName()
+FName FVersionInstallationProcessorStyle::GetStyleSetName()
 {
 	static FName StyleSetName(TEXT("VersionInstallationProgressStyle"));
 	return StyleSetName;
@@ -43,7 +43,7 @@ FName FVersionInstallationProgressStyle::GetStyleSetName()
 #define IMAGE_BRUSH( RelativePath, ... ) FSlateImageBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
 
 const FVector2D Icon1920x1080(1920.0f, 1080.0f);
-TSharedRef<class FSlateStyleSet> FVersionInstallationProgressStyle::Create()
+TSharedRef<class FSlateStyleSet> FVersionInstallationProcessorStyle::Create()
 {
 	FString ProgressPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Resources"));
 	TSharedRef< FSlateStyleSet > Style = MakeShareable(new FSlateStyleSet("VersionInstallationProgressStyle"));

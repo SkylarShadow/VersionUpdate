@@ -151,19 +151,7 @@ void FVersionInstallationManage::HandleDescribe(
 	{
 		if (!Tmp.Name.IsEmpty())
 		{
-			FString NewPath;
-			if (Tmp.InstallDir.IsEmpty())
-			{
-				NewPath = InProjectToContentPaks;
-			}
-			else
-			{
-				NewPath = InProjectRootPath + Tmp.InstallDir;
-			}
-
-			NewPath /= Tmp.Name;
-
-			DeleteFile(*NewPath);
+			DeleteFile(*GetInstallTargetPath(Tmp, InProjectToContentPaks, InProjectRootPath));
 		}
 	}
 }

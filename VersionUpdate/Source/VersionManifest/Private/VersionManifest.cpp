@@ -18,4 +18,4 @@ void FVersionManifestModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FVersionManifestModule, VersionObject)
+IMPLEMENT_MODULE(FVersionManifestModule, VersionManifest)

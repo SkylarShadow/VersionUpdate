@@ -7,7 +7,7 @@
 
 // 是为了和独立程序对应
 static FString ClientVersionJsonRelativePath = TEXT("Version/ClientVersion.config");
-
+static FString TempClientVersionJsonRelativePath = TEXT("Version/TempClientVersion.config");
 UENUM(BlueprintType)
 enum class EPatchFileTag : uint8
 {
@@ -95,7 +95,8 @@ struct VERSIONMANIFEST_API FPatchList
 	// 所有补丁版本
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patch Manifest")
 	TArray<FPatchVersion> Patches;
-
+	
+	// 主版本需更新的文件
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patch Manifest")
 	TArray<FRemotePatchFile> MajorVersionFiles;
 };

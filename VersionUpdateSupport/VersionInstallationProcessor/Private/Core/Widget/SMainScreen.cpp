@@ -3,8 +3,8 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/Text/STextBlock.h"
-#include "VersionInstallationProgressType.h"
-#include "Core/Style/VersionInstallationProgressStyle.h"
+#include "VersionInstallationProcessorType.h"
+#include "Core/Style/VersionInstallationProcessorStyle.h"
 
 #define LOCTEXT_NAMESPACE "SMainScreen"
 
@@ -18,7 +18,7 @@ void SMainScreen::Construct(const FArguments& InArgs)
 		.VAlign(VAlign_Fill)
 		[
 			SNew(SImage)
-			.Image(FVersionInstallationProgressStyle::Get().GetBrush("VersionInstallationProgressStyle.Background"))
+			.Image(FVersionInstallationProcessorStyle::Get().GetBrush("VersionInstallationProcessorStyle.Background"))
 		]
 
 		+ SOverlay::Slot()
