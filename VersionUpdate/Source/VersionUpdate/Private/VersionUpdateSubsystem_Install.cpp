@@ -66,11 +66,26 @@ namespace
 
 	bool MountPakFile(const FString& PakFile)
 	{
-#if VERSIONUPDATE_USE_HOTPATCHER_PAK
-		return UFlibPakHelper::MountPak(PakFile, 0, TEXT(""));
+#if WITH_EDITOR
+		UE_LOG(LogVersionUpdate, Warning, TEXT("[VersionUpdate] Skip runtime Pak mount in editor: %s"), *PakFile);
+		return true;
 #else
-		return UVersionPakBPLibrary::MountPak(PakFile, 0, TEXT(""));
+#if VERSIONUPDATE_USE_HOTPATCHER_PAK
+		const int32 PakOrder = FMath::Max(UFlibPakHelper::GetPakOrderByPakPath(PakFile), 100);
+		return UFlibPakHelper::MountPak(PakFile, PakOrder, TEXT(""));
+#else
+		return UVersionPakBPLibrary::MountPak(PakFile, 100, TEXT(""));
 #endif
+#endif
+	}
+
+	// 主包通常是 ProjectName-Windows.pak / pakchunk0-Windows.pak 这类基础资源包；
+	// 热更新补丁 Pak 通常带 patch 标识或 UE patch 约定的 _P 后缀。
+	// 这里保守处理：只有明显是补丁 Pak 的文件才允许当前进程尝试卸载。
+	bool IsPatchPakFile(const FString& PakFile)
+	{
+		FString BaseName = FPaths::GetBaseFilename(PakFile).ToLower();
+		return BaseName.Contains(TEXT("patch")) || BaseName.EndsWith(TEXT("_p"));
 	}
 
 	// 文件复制进度回调。每个文件按同等权重累加到总安装进度。
@@ -165,13 +180,15 @@ bool UVersionUpdateSubsystem::ExecuteSeamlessInstall()
 	if (!bInstallOK)
 	{
 		// 安装失败时尽量恢复之前卸载的 Pak，并恢复内存里的旧 ClientManifest。
-		RemountCachedPaks();
+		MountInstalledPatchPaks(OriginalClientManifest);
 		ClientManifest = OriginalClientManifest;
 		return false;
 	}
 
 	// 文件已安装成功，但重新挂载失败也会导致当前进程状态不可靠。
-	if (!RemountCachedPaks())
+	// 文件复制、废弃文件删除和安装后校验完成后，按最终清单挂载仍然有效的补丁 Pak。
+	// 这样本轮新增 Pak 会立即进入当前进程，被废弃的旧 Pak 不会再挂回去。
+	if (!MountInstalledPatchPaks(InstalledClientManifest))
 	{
 		return false;
 	}
@@ -358,26 +375,74 @@ bool UVersionUpdateSubsystem::LaunchExternalInstaller()
 bool UVersionUpdateSubsystem::UnmountMountedPaks()
 {
 	MountedPakCache.Empty();
-	GetMountedPakFilenames(MountedPakCache);
 
-	for (const FString& PakFile : MountedPakCache)
+	TArray<FString> MountedPaks;
+	GetMountedPakFilenames(MountedPaks);
+
+	for (const FString& PakFile : MountedPaks)
 	{
+		// 不卸载主包/基础包。它们通常一直有资源请求，强制卸载会触发 UE 的 Pak outstanding requests 断言。
+		if (!IsPatchPakFile(PakFile))
+		{
+			UE_LOG(LogVersionUpdate, Display, TEXT("[VersionUpdate] Skip mounted base pak: %s"), *PakFile);
+			continue;
+		}
+
 		if (!UnmountPakFile(PakFile))
 		{
 			return false;
 		}
+
+		MountedPakCache.Add(PakFile);
 	}
 
 	return true;
 }
 
 // 重新挂载无感安装前缓存的 Pak。
-bool UVersionUpdateSubsystem::RemountCachedPaks()
+bool UVersionUpdateSubsystem::MountInstalledPatchPaks(const FClientVersionFilesList& InstalledManifest)
 {
-	for (const FString& PakFile : MountedPakCache)
+	bool bAllMounted = true;
+	TSet<FString> MountedPakPaths;
+
+	for (const FRemotePatchFile& File : InstalledManifest.InstalledPatchFiles)
 	{
-		MountPakFile(PakFile);
+		if (File.Tag != EPatchFileTag::Pak || File.Name.IsEmpty() || File.bDiscard)
+		{
+			continue;
+		}
+
+		const FString PakFile = PatchManifest::GetInstallAbsolutePath(File, FPaths::ProjectDir());
+		if (MountedPakPaths.Contains(PakFile))
+		{
+			continue;
+		}
+
+		if (!IsPatchPakFile(PakFile))
+		{
+			UE_LOG(LogVersionUpdate, Display, TEXT("[VersionUpdate] Skip non-patch pak mount: %s"), *PakFile);
+			continue;
+		}
+
+		if (!FPaths::FileExists(PakFile))
+		{
+			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Installed patch pak not found: %s"), *PakFile);
+			bAllMounted = false;
+			continue;
+		}
+
+		const bool bMounted = MountPakFile(PakFile);
+		if (bMounted)
+		{
+			UE_LOG(LogVersionUpdate, Display, TEXT("[VersionUpdate] Mount installed patch pak succeeded: %s"), *PakFile);
+		}
+		else
+		{
+			UE_LOG(LogVersionUpdate, Error, TEXT("[VersionUpdate] Mount installed patch pak failed: %s"), *PakFile);
+		}
+		bAllMounted &= bMounted;
+		MountedPakPaths.Add(PakFile);
 	}
 
-	return true;
+	return bAllMounted;
 }

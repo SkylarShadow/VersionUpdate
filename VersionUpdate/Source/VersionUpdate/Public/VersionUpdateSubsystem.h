@@ -236,7 +236,7 @@ private:
 	bool ExecuteSeamlessInstall();
 	bool LaunchExternalInstaller();
 	bool UnmountMountedPaks();
-	bool RemountCachedPaks();
+	bool MountInstalledPatchPaks(const FClientVersionFilesList& InstalledManifest);
 	void UpdateClientManifestAfterInstall();
 
 	// 初始化本地 ClientManifest，不存在时创建。
