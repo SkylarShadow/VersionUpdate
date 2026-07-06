@@ -44,7 +44,7 @@ public:
 	FString ServerJsonURL = "http://192.168.6.142:80/PatchList.json";
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Version")
-	bool bSeamlessHotUpdate = false;
+	bool bSeamlessHotUpdate = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Version")
 	bool bSynchronous = true;
